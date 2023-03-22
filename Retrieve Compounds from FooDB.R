@@ -10,6 +10,7 @@ library(readxl)
 library(dplyr)
 library(tidyverse)
 library(data.table)
+library(reshape2)
 
 # Load data
 food <- read.csv('Food.csv')
@@ -149,6 +150,8 @@ for (y in ffqgroup) {
   split_ffq_collapse[[y]] <- out
 }
 
+##======================== NEW COLLAPSED DATAFRAME AND ADD FFQ GROUPS ==================##
+
 # Creating a new dataframe with mean orig_content per compound --> 9837 obs in total
 ffq_chem_collapse <- rbindlist(split_ffq_collapse, fill = TRUE)
 
@@ -156,24 +159,26 @@ ffq_chem_collapse <- rbindlist(split_ffq_collapse, fill = TRUE)
 sum(is.na(ffq_chem_collapse$orig_source_name)) # 285 NA items in orig_source_name
 NA_name <- ffq_chem_collapse[is.na(ffq_chem_collapse$orig_source_name),]
 
+ffq_chem <- merge(ffq_chem_collapse, id, by = 'food_id', ) # adding ffq elements to dataframe
+
+# Split full dataframe based on ffq_element
+split_1 <- split(ffq_chem, ffq_chem$ffq_group_1)
+split_2 <- split(ffq_chem, ffq_chem$ffq_group_2)
+split_3 <- split(ffq_chem, ffq_chem$ffq_group_3)
+split_4 <- split(ffq_chem, ffq_chem$ffq_group_4)
+split_5 <- split(ffq_chem, ffq_chem$ffq_group_5)
+split_6 <- split(ffq_chem, ffq_chem$ffq_group_6)
+ffq_chem_list <- c(split_1, split_2, split_3, split_4, split_5, split_6)
+
+# Melt list into one dataframe and merge the ffq_groups to one column
+ffq_chem_melt <- melt(ffq_chem_list, measure.vars = 'food_id', level = 'ffq_group') 
+ffq_chem_melt <- subset(ffq_chem_melt, select = -c(18:25))
+colnames(ffq_chem_melt) [18] <- 'ffq_group'
+
+##======================= FINAL DATAFRAME, CLEANING NA's IN ORIG_SOURCE_NAME =======================##
+
+# Create final df containing ffq_group, source_name, orig_content, orig_unit
+final_ffqchem <- subset(ffq_chem_melt, select = c(ffq_group, public_id, orig_source_name, orig_content, orig_unit, source_id))
+
 # Clean DF by removing remaining NA's in orig_source_name
-ffq_chem_collapse_clean <- ffq_chem_collapse[!is.na(ffq_chem_collapse$orig_source_name),]
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+final_ffqchem_clean <- final_ffqchem[!is.na(final_ffqchem$orig_source_name),]
