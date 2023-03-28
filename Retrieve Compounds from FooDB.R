@@ -30,8 +30,8 @@ colnames(id)[8] <- 'food_id'
 foodid <- as.character(id$food_id)
 ffq_content <- content[content$food_id %in% foodid, ] #filter content table based on food_id in character
 
-# Filter and merge content with ffq elements
-chem_ffq <- merge(ffq_content, id, by = 'food_id', ) # add ffq elements to chem data
+# Filter
+chem_ffq <- ffq_content
 chem_ffq[chem_ffq == ""] <- NA # set all blank space to NA
 chem_ffq <- chem_ffq %>% drop_na(orig_content) # drop all rows that don't contain chem orig_content data
 
@@ -66,32 +66,10 @@ sum(is.na(chem_ffq_comp$orig_source_name)) #17160 NA values
 sum(is.na(chem_ffq_comp_nut$orig_source_name)) #12062 NA values
 sum(is.na(chem_ffq_comp_nut_fill$orig_source_name)) #7376 NA values
 
-##======================== EXPLORING REMAINING NA's ===============================##
-
-## Checking NA's + source_id's 
-df <- select(chem_ffq_comp_nut
-             , c('source_id','orig_source_name', 'orig_content', 'orig_unit'))
-sum(df$source_id == 0) #5894 items with source_id equal to 0
-df2 <- df[is.na(df$orig_source_name),]
-sum(df2$orig_content == 0) 
-# 5241 items have no source name, where orig_content is equal to 0
-sum(df2$orig_content == 0 & df2$source_id == 0) 
-# 2160 items have source_id equal to 0 & and orig_content equal to 0
-
-split_source_id <- split(chem_ffq_comp_nut, chem_ffq_comp_nut$source_id)
-
-first_sourceid <- lapply(split_source_id,'[',1,) #show first row of each source_id
-first_sourceid <- rbindlist(first_sourceid, fill = TRUE)
-first_NA <- first_sourceid[is.na(first_sourceid$orig_source_name),] #40 NA as first row
-#Check if NA in first row contains a name in another row
-sourceid <- as.character(first_NA$source_id)
-NA_sourceid <- chem_ffq_comp_nut[chem_ffq_comp_nut$source_id %in% sourceid, ]
-NA_sourceid_name <- subset(NA_sourceid, select = c(source_id, orig_source_name))
-
 ##================== SPLITTING DATA ON FOOD_ID AND COLLAPSING BASED ON SOURCE_ID ==========##
 
 #Split whole chem df on food_id
-split_food_id <- split(chem_ffq_comp_nut_fill, chem_ffq_comp_nut$food_id)
+split_food_id <- split(chem_ffq_comp_nut_fill, chem_ffq_comp_nut_fill$food_id)
 
 # Write function that groups dataframes in the list by source id, takes mean of orig_content
 collapse <- function(df) { df %>% 
@@ -150,35 +128,67 @@ for (y in ffqgroup) {
   split_ffq_collapse[[y]] <- out
 }
 
-##======================== NEW COLLAPSED DATAFRAME AND ADD FFQ GROUPS ==================##
-
-# Creating a new dataframe with mean orig_content per compound --> 9837 obs in total
-ffq_chem_collapse <- rbindlist(split_ffq_collapse, fill = TRUE)
-
-# Check NA's in Source_Name
-sum(is.na(ffq_chem_collapse$orig_source_name)) # 285 NA items in orig_source_name
-NA_name <- ffq_chem_collapse[is.na(ffq_chem_collapse$orig_source_name),]
-
-ffq_chem <- merge(ffq_chem_collapse, id, by = 'food_id', ) # adding ffq elements to dataframe
-
-# Split full dataframe based on ffq_element
-split_1 <- split(ffq_chem, ffq_chem$ffq_group_1)
-split_2 <- split(ffq_chem, ffq_chem$ffq_group_2)
-split_3 <- split(ffq_chem, ffq_chem$ffq_group_3)
-split_4 <- split(ffq_chem, ffq_chem$ffq_group_4)
-split_5 <- split(ffq_chem, ffq_chem$ffq_group_5)
-split_6 <- split(ffq_chem, ffq_chem$ffq_group_6)
-ffq_chem_list <- c(split_1, split_2, split_3, split_4, split_5, split_6)
+##======================== NEW COLLAPSED DATAFRAME  ============================##
 
 # Melt list into one dataframe and merge the ffq_groups to one column
-ffq_chem_melt <- melt(ffq_chem_list, measure.vars = 'food_id', level = 'ffq_group') 
-ffq_chem_melt <- subset(ffq_chem_melt, select = -c(18:25))
-colnames(ffq_chem_melt) [18] <- 'ffq_group'
+ffq_chem_melt <- melt(split_ffq_collapse, measure.vars = 'food_id', level = 'ffq_group') 
+colnames(ffq_chem_melt) [19] <- 'ffq_group'
+colnames(ffq_chem_melt) [18] <- 'food_id'
 
-##======================= FINAL DATAFRAME, CLEANING NA's IN ORIG_SOURCE_NAME =======================##
+# Check NA's in Source_Name
+sum(is.na(ffq_chem_melt$orig_source_name)) # 285 NA items in orig_source_name
+NA_name <- ffq_chem_melt[is.na(ffq_chem_collapse$orig_source_name),]
+
+##======================= FINAL DATAFRAME, ENERGY IN SEPERATE FILE, CONVERTING UNITS TO MG/100G =============================##
 
 # Create final df containing ffq_group, source_name, orig_content, orig_unit
-final_ffqchem <- subset(ffq_chem_melt, select = c(ffq_group, public_id, orig_source_name, orig_content, orig_unit, source_id))
+final_ffqchem <- subset(ffq_chem_melt, select = c(ffq_group, food_id, orig_source_name, orig_content, orig_unit, source_id))
 
-# Clean DF by removing remaining NA's in orig_source_name
-final_ffqchem_clean <- final_ffqchem[!is.na(final_ffqchem$orig_source_name),]
+# Clean DF by removing remaining NA's in orig_source_name and setting all where unit is mg/100g to the same format
+final_ffqchem$orig_unit <- gsub('mg/100 g', 'mg/100g', final_ffqchem$orig_unit)
+
+# Make seperate dataframe for energy per food item
+energy <- final_ffqchem[final_ffqchem$orig_source_name == 'Energy', ]
+write.csv2(energy, file = 'energy.csv')
+final_ffqchem <- subset(final_ffqchem, orig_source_name != 'Energy') #remove rows containing energy content of food items
+
+# Set all rows where unit is mg/kg '' to mg/kg
+final_ffqchem$orig_unit <- gsub('mg/kg puree', 'mg/kg', final_ffqchem$orig_unit)
+final_ffqchem$orig_unit <- gsub('mg/kg fresh sample', 'mg/kg', final_ffqchem$orig_unit)
+final_ffqchem$orig_unit <- gsub('mg/kg fresh weight', 'mg/kg', final_ffqchem$orig_unit)
+# Set all rows where unit is µg/kg '' to µg/kg
+final_ffqchem$orig_unit <- gsub('ug/kg fresh weight', 'µg/kg', final_ffqchem$orig_unit)
+final_ffqchem$orig_unit <- gsub('ug/kg dry weight', 'µg/kg', final_ffqchem$orig_unit)
+# Set all rows where unit is Î+--TE to mg-TE
+final_ffqchem$orig_unit <- gsub('Î±-TE', 'mg-TE', final_ffqchem$orig_unit)
+
+# Conversions from measured unit (mg/kg or µg/kg) to mg/100g
+final_ffqchem$new_content <- ifelse(final_ffqchem$orig_unit == 'mg/kg', final_ffqchem$orig_content/10, final_ffqchem$orig_content)
+final_ffqchem$new_unit <- gsub('mg/kg', 'mg/100g', final_ffqchem$orig_unit)
+final_ffqchem$new_content <- ifelse(final_ffqchem$orig_unit == 'µg/kg', final_ffqchem$orig_content/1000, final_ffqchem$new_content)
+final_ffqchem$new_unit <- gsub('µg/kg', 'mg/100g', final_ffqchem$new_unit)
+
+# Vitamin D and A measured in IU to mg/100g
+final_ffqchem$new_content <- ifelse(final_ffqchem$orig_source_name == 'Vitamin D', final_ffqchem$orig_content/0.000025, final_ffqchem$new_content)
+final_ffqchem$new_content <- ifelse(final_ffqchem$food_id == '721' & final_ffqchem$orig_source_name == 'Vitamin A, IU', final_ffqchem$orig_content/0.0006, final_ffqchem$new_content)
+final_ffqchem$new_content <- ifelse(final_ffqchem$food_id != '721' & final_ffqchem$orig_source_name == 'Vitamin A, IU', final_ffqchem$orig_content/0.0003, final_ffqchem$new_content)
+final_ffqchem$new_unit <- gsub('IU', 'mg/100g', final_ffqchem$new_unit)
+
+# Vitamin A measured in RE to mg/100g
+plant_A <- c(649, 65, 939, 277, 98, 16, 125, 175, 22, 274, 24, 630, 47, 788, 105, 605, 59, 836, 268)
+plant_A <- as.character(plant_A)
+for (a in plant_A) {
+  z <- ifelse(final_ffqchem$orig_source_name == 'Vitamin A, total', final_ffqchem$orig_content/0.006, final_ffqchem$new_content)
+  final_ffqchem$new_content <- z
+}
+animal_A <- c(667, 714, 709, 710, 711, 605, 633, 873, 506, 761, 549, 669, 634)
+animal_A <- as.character(animal_A)
+for (b in plant_A) {
+  t <- ifelse(final_ffqchem$orig_source_name == 'Vitamin A, total', final_ffqchem$orig_content/0.001, final_ffqchem$new_content)
+  final_ffqchem$new_content <- t
+}
+final_ffqchem$new_unit <- gsub('RE', 'mg/100g', final_ffqchem$new_unit)
+
+# For Vitamin E and B3 the content stays the same as 1 NE or mg-TE = 1 mg
+final_ffqchem$new_unit <- gsub('NE', 'mg/100g', final_ffqchem$new_unit)
+final_ffqchem$new_unit <- gsub('mg-TE', 'mg/100g', final_ffqchem$new_unit)
