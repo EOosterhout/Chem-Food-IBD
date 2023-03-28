@@ -18,13 +18,15 @@ content <- read.csv('Content.csv')
 compounds <- read.csv('Compound.csv')
 nutrients <- read.csv('Nutrient.csv')
 id <- read_xlsx('idlist.xlsx')
+ffq <- read_xlsx('foodid_ffqgroup.xlsx')
 
 ##========================= CLEAN DATA AND FILL/REMOVE NA'S ===========================##
 
 # Filter for foods asked in FFQ and add food_id column to idlist
-ffq <- food[match(id$public_id, food$public_id), ]
-id <- cbind(id, ffq$id) 
+ffq_match <- food[match(id$public_id, food$public_id), ]
+id <- cbind(id, ffq_match$id) 
 colnames(id)[8] <- 'food_id'
+write.csv2(id, file = 'ID_foodid.csv')
 
 #Get ids, subset table 'content'
 foodid <- as.character(id$food_id)
@@ -101,26 +103,19 @@ for (x in foodid) {
 
 # Creating a new dataframe with mean orig_content per compound 
 chem_collapse <- rbindlist(split_foodid_collapse, fill = TRUE) #--> 9694 obs in total
-chem_ffq_collapse <- merge(chem_collapse, id, by = 'food_id', ) # adding ffq elements to dataframe
+chem_ffq_collapse <- merge(chem_collapse, ffq, by = 'food_id', allow.cartesian = TRUE ) # adding ffq elements to dataframe
 
 #Check NA's in source_name
-sum(is.na(chem_ffq_collapse$orig_source_name)) # 280 NA items in orig_source_name
+sum(is.na(chem_ffq_collapse$orig_source_name)) # 430 NA items in orig_source_name
 NA_sourcename <- chem_ffq_collapse[is.na(chem_ffq_collapse$orig_source_name),]
 
 ##================= SPLITTING COLLAPSED DATA (SOURCE_ID) ON FFQ_GROUP AND COLLAPSING AGAIN BASED ON SOURCE_ID ============##
 
 # Split full dataframe based on ffq_element
-split_1 <- split(chem_ffq_collapse, chem_ffq_collapse$ffq_group_1)
-split_2 <- split(chem_ffq_collapse, chem_ffq_collapse$ffq_group_2)
-split_3 <- split(chem_ffq_collapse, chem_ffq_collapse$ffq_group_3)
-split_4 <- split(chem_ffq_collapse, chem_ffq_collapse$ffq_group_4)
-split_5 <- split(chem_ffq_collapse, chem_ffq_collapse$ffq_group_5)
-split_6 <- split(chem_ffq_collapse, chem_ffq_collapse$ffq_group_6)
-ffq_chem_list <- c(split_1, split_2, split_3, split_4, split_5, split_6)
+ffq_chem_list <- split(chem_ffq_collapse, chem_ffq_collapse$ffq_group)
 
 # Loop the collapse function over the ffq split dataframe and store in list
-ffqelement <- read_xlsx('ffq_group.xlsx') # data containing ffq_groups
-ffqgroup <- as.character(ffqelement$ffq_group) # setting ffq_groups as character
+ffqgroup <- as.character(ffq$ffq_group) # setting ffq_groups as character
 
 split_ffq_collapse <- list() #empty list to store output of for loop in
 for (y in ffqgroup) {
@@ -137,7 +132,11 @@ colnames(ffq_chem_melt) [18] <- 'food_id'
 
 # Check NA's in Source_Name
 sum(is.na(ffq_chem_melt$orig_source_name)) # 285 NA items in orig_source_name
-NA_name <- ffq_chem_melt[is.na(ffq_chem_collapse$orig_source_name),]
+NA_name <- ffq_chem_melt[is.na(ffq_chem_melt$orig_source_name),]
+
+# Make seperate dataframe for energy per food item
+energy <- ffq_chem_melt[ffq_chem_melt$orig_source_name == 'Energy', ]
+  write.csv2(energy, file = 'energy.csv')
 
 ##======================= FINAL DATAFRAME, ENERGY IN SEPERATE FILE, CONVERTING UNITS TO MG/100G =============================##
 
@@ -146,11 +145,6 @@ final_ffqchem <- subset(ffq_chem_melt, select = c(ffq_group, food_id, orig_sourc
 
 # Clean DF by removing remaining NA's in orig_source_name and setting all where unit is mg/100g to the same format
 final_ffqchem$orig_unit <- gsub('mg/100 g', 'mg/100g', final_ffqchem$orig_unit)
-
-# Make seperate dataframe for energy per food item
-energy <- final_ffqchem[final_ffqchem$orig_source_name == 'Energy', ]
-write.csv2(energy, file = 'energy.csv')
-final_ffqchem <- subset(final_ffqchem, orig_source_name != 'Energy') #remove rows containing energy content of food items
 
 # Set all rows where unit is mg/kg '' to mg/kg
 final_ffqchem$orig_unit <- gsub('mg/kg puree', 'mg/kg', final_ffqchem$orig_unit)
