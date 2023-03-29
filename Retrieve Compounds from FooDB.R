@@ -11,6 +11,7 @@ library(dplyr)
 library(tidyverse)
 library(data.table)
 library(reshape2)
+library(writexl)
 
 # Load data
 food <- read.csv('Food.csv')
@@ -186,3 +187,50 @@ final_ffqchem$new_unit <- gsub('RE', 'mg/100g', final_ffqchem$new_unit)
 # For Vitamin E and B3 the content stays the same as 1 NE or mg-TE = 1 mg
 final_ffqchem$new_unit <- gsub('NE', 'mg/100g', final_ffqchem$new_unit)
 final_ffqchem$new_unit <- gsub('mg-TE', 'mg/100g', final_ffqchem$new_unit)
+
+##========================= TRANSPOSING FINAL DATAFRAME ==================##
+
+# New df containing ffq_group, source_name and content; 
+# removing NA in orig_source_name as they also don't contain chem data (6 elements dropped)
+name_content <- subset(final_ffqchem, select = c(ffq_group, orig_source_name, new_content)) %>%
+  drop_na(orig_source_name)
+# split df based on ffq_group
+split_name_content <- split(name_content, name_content$ffq_group)
+
+# write function that drops ffq_group column
+remove_column <- function(s) {
+  s[!(names(s) %in% 'ffq_group')]
+} 
+# Apply remove_column function
+drop_ffqgroup <- list()
+for (y in ffqgroup) {
+  m <- remove_column(split_name_content[[y]])
+  drop_ffqgroup[[y]] <- m
+}
+# Apply transpose function to df
+names_contents <- list()
+for (y in ffqgroup) {
+  n <- transpose(drop_ffqgroup[[y]])
+  names_contents[[y]] <- n
+}
+
+# Function setting first row as colnames
+header.true <- function(k) {
+  names(k) <- as.character(unlist(k[1,]))
+  k[-1,]
+}
+
+# Apply function to list, setting the orig_source_name as colnames
+col_ffqchem <- list()
+for (y in ffqgroup) {
+  g <- header.true(names_contents[[y]])
+  col_ffqchem[[y]] <- g
+}
+
+# Melt the list to the final transposed dataframe with first column containing ffq_groups
+transposed_ffqchem <- melt(col_ffqchem)
+transposed_ffqchem <- transposed_ffqchem %>%
+  select(L1, everything())
+colnames(transposed_ffqchem)[1] <- 'ffq_group'
+transposed_ffqchem[, 2:1191] <- sapply(transposed_ffqchem[, 2:1191], as.double) # set all columns with chemcontent to numeric
+write_xlsx(transposed_ffqchem, 'transposed_ffqchem.xlsx') # save df as excel workbook
