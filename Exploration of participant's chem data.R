@@ -20,6 +20,7 @@ library(writexl)
 #packages for testing/visualizing data distribution
 library(ggpubr)
 library(FSA)
+library(ggsignif)
 #specific packages for PCA
 library(ggfortify)
 library(corrr)
@@ -201,7 +202,7 @@ ggplot(chem.pca.contrib.diet, aes(Dim.1,Dim.2, fill=type_of_diet)) +
   theme(legend.position = 'bottom',
         axis.text.x = element_text(vjust=0.5, size = 10)) 
 
-##=================================== TEST DIFFERENCES BETWEEN IBD AND CONTROL: T-TEST =================================##
+##=================================== DESCRIPTIVE STATISTICS INTAKE METABOLITE DATA =================================##
 
 #function that creates a new data object containing descriptive statistics
 sumstats <- function(z){
@@ -221,100 +222,7 @@ stat_LLDEEP <- sumstats(LLDEEP_chem) # LLDEEP participants
 stat_LLDEEP$group <- 'LLDEEP'
 stat_chem <- rbind(stat_IBD, stat_LLDEEP) # full chem data
 
-## T-TEST ##
-
-# Create an empty list to store the results of t-test
-results <- list()
-# Loop through the variables and perform t-test for each element
-for (var in chem_names) {
-  temp <- t.test(chem_part[chem_part$group == "IBD", var], chem_part[chem_part$group == "LLDEEP", var])
-    results[[var]] <- temp
-}
-
-# Filter significant differences (p<0.05) and exclude NaN and NA values
-significant_results <- list()
-for (i in chem_names) {
-  # Check if p-value is significant and exclude NaN and NA values
-  if (!is.na(results[[i]]$p.value) & !is.nan(results[[i]]$p.value) & results[[i]]$p.value < 0.05) {
-    significant_results[[i]] <- results[[i]]
-  }
-}
-
-# convert chem_part to long format
-melted_data <- melt(chem_part, id.vars = "group", measure.vars = chem_names)
-
-filtered_data <- list()
-for (var in names(significant_results)) {
-  # Filter data for significant variable
-  filtered_data <- melted_data[melted_data$variable == var,]
-  filtered_data[[var]] <- out
-}
-
-filtered_data <- rbindlist(filtered_data)
-
-         #Boxplots of significant t-test results (p < 0.05)#
-
-box_plots <- list()
-for (var in names(significant_results)) {
-  # Filter data for significant variable
-  filtered_data <- melted_data[melted_data$variable == var, ]
-  
-  # Create box plot using ggplot
-  plot <- ggplot(filtered_data, aes(x = group, y = value, fill = group)) + 
-    geom_boxplot() + 
-    ggtitle(var) +
-    geom_text(aes(x = 1.5, y = max(filtered_data$value), label = paste0("p = ", signif(significant_results[[var]]$p.value, 2))), 
-              size = 5, hjust = 0.5, vjust = 1.5)
-  box_plots[[var]] <- plot
-  
-  # Create directory for the output files if it doesn't exist
-  if (!dir.exists("output")) {
-    dir.create("output")
-  }
-  
-  # Save the box plot as PNG file in the output folder
-  filename <- paste0("output/", var, ".png")
-  ggsave(filename, plot = plot, width = 6, height = 4, dpi = 300)
-}
-
-
-# Filter significant differences (p < 0.01) and exclude NaN and NA values
-significant_results_small <- list()
-for (i in chem_names) {
-  # Check if p-value is significant and exclude NaN and NA values
-  if (!is.na(results[[i]]$p.value) & !is.nan(results[[i]]$p.value) & results[[i]]$p.value < 0.01) {
-    significant_results_small[[i]] <- results[[i]]
-  }
-}
-
-                   #Boxplots of T-test results (p < 0.01)#
-
-box_plots <- list()
-for (var in names(significant_results_small)) {
-  # Filter data for significant variable
-  filtered_data <- melted_data[melted_data$variable == var, ]
-  
-  # Create box plot using ggplot
-  plot <- ggplot(filtered_data, aes(x = group, y = value, fill = group)) + 
-    geom_boxplot() + 
-    ggtitle(var) +
-    geom_text(aes(x = 1.5, y = max(filtered_data$value), label = paste0("p = ", signif(significant_results_small[[var]]$p.value, 2))), 
-              size = 5, hjust = 0.5, vjust = 1.5)
-  box_plots[[var]] <- plot
-  
-  # Create directory for the output files if it doesn't exist
-  if (!dir.exists("output_small")) {
-    dir.create("output_small")
-  }
-  
-  # Save the box plot as PNG file in the output folder
-  filename <- paste0("output_small/", var, ".png")
-  ggsave(filename, plot = plot, width = 6, height = 4, dpi = 300)
-}
-
-
-
-##===================================== T-TEST ON LOG TRANSFORMED AND FILTERED CHEM DATA ====================================================##
+##===================================== DIFFERENTIAL ABUNDANCE ANALYSIS ON LOG TRANSFORMED AND FILTERED CHEM DATA ====================================================##
 
 # Calculate the percentage of non-zero values for each variable
 non_zero_pct <- apply(num_dat != 0, 2, mean)
@@ -325,64 +233,301 @@ filter_20pct <- num_dat[,non_zero_pct >= 0.2]
 
 #add pseudocount to all variables and perform log-transformation
 pseudo_chem <- filter_20pct + 1
-log_chem <- log(pseudo_chem, 2)
 
 # Create a new column specifying the group for each sample
-log_chem$group <- ifelse(chem_part$UMCGIBDResearchIDorLLDeepID %in% IBD_ID, "IBD", "LLDEEP")
+pseudo_chem$group <- ifelse(chem_part$UMCGIBDResearchIDorLLDeepID %in% IBD_ID, "IBD", "LLDEEP")
 names <- names(pseudo_chem)
-## T-TEST ##
 
-# Create an empty list to store the results of t-test
-results_log <- list()
-# Loop through the variables and perform t-test for each element
-for (var in names) {
-  temp <- t.test(log_chem[log_chem$group == "IBD", var], log_chem[log_chem$group == "LLDEEP", var])
-  results_log[[var]] <- temp
-}
+##============================= T-TEST ==================================##
+ttest_p <- c() # Initialize empty vector for p-values
 
-# Filter significant differences (p<0.001) and exclude NaN and NA values
-significant_results_log <- list()
+# Do "for loop" over selected column names
 for (i in names) {
-  # Check if p-value is significant and exclude NaN and NA values
-  if (!is.na(results[[i]]$p.value) & !is.nan(results_log[[i]]$p.value) & results_log[[i]]$p.value < 0.001) {
-    significant_results_log[[i]] <- results_log[[i]]
-  }
-}
-
-# Filter significant differences and exclude NaN and NA values
-significant_results_log_est <- list()
-for (var in names) {
-  # Check if p-value is significant and the difference in estimate is greater than 1.0
-  if (!is.na(results_log[[var]]$p.value) & !is.nan(results_log[[var]]$p.value) & 
-      results_log[[var]]$p.value < 0.001 & abs(results_log[[var]]$estimate[1] - results_log[[var]]$estimate[2]) > 2.0) {
-    significant_results_log_est[[var]] <- results_log[[var]]
-  }
-}
-
-# convert log_chem to long format
-melted_data_log_est <- melt(log_chem, id.vars = "group", measure.vars = names(significant_results_log_est))
-
-                    #Boxplots of T-test results (p < 0.001)#
-
-box_plots <- list()
-for (var in names(significant_results_log_est)) {
-  # Filter data for significant variable
-  filtered_data <- melted_data_log[melted_data_log$variable == var, ]
   
-  # Create box plot using ggplot
-  plot <- ggplot(filtered_data, aes(x = group, y = value, fill = group)) + 
+  result <- t.test(pseudo_chem[, i] ~ group,
+                        data = pseudo_chem)
+  
+  # Stores p-value to the vector with this column name
+  ttest_p[[i]]  <- result$p.value
+  
+}
+
+#store metabolites with raw p-value in new dataframe
+ttest_p <- data.frame(metabolites =  names(ttest_p),
+                         p_raw = unlist(ttest_p))
+ttest_p$p_adjusted <- p.adjust(ttest_p$p_raw, method = "fdr") #add column with p_adj for multiple testing
+
+# prepare a dataframe to plot p values
+df <- data.frame(x = c(ttest_p$p_raw, ttest_p$p_adjusted), 
+                 type=rep(c("raw", "fdr"),
+                          c(length(ttest_p$p_raw),
+                            length(ttest_p$p_adjusted))))
+
+# make a histrogram of p values and adjusted p values
+ttest_plot <- ggplot(df) +
+  geom_histogram(aes(x=x, fill=type)) +
+  labs(x = "p-value", y = "Frequency") 
+
+ttest_plot
+
+# Sorts p-values in decreasing order. Takes 3 first ones. Takes those rows that match
+# with p-values. Takes metabolites. 
+highest3 <- ttest_p[ttest_p$p_adjusted %in% sort(ttest_p$p_adjusted, decreasing = TRUE)[1:3], ]$metabolites
+# From log transformed table, takes only those metabolites that had highest p-values
+highest3_chem <- pseudo_chem[,colnames(pseudo_chem) %in% highest3]
+# Adds colData that includes patient status infomation
+highest3_full <- cbind(pseudo_chem$group, highest3_chem)
+
+# Sorts p-values in increasing order. Takes 3rd first ones. Takes those rows that match
+# with p-values. Takes metabolites. 
+lowest3 <- ttest_p[ttest_p$p_adjusted %in% sort(ttest_p$p_adjusted, decreasing = FALSE)[1:3], ]$metabolites
+# From log transformed table, takes only those metabolites that had highest p-values
+lowest3_chem <- pseudo_chem[,colnames(pseudo_chem) %in% lowest3]
+# Adds colData that includes patient status infomation
+lowest3_full <- cbind(pseudo_chem$group, lowest3_chem)
+
+# Puts plots in the same picture
+gridExtra::grid.arrange(
+  
+  # Plot 1
+  ggplot(highest3_full, aes(x = pseudo_chem$group, y = highest3_full[,2], fill = pseudo_chem$group)) + 
     geom_boxplot() + 
-    ggtitle(var) +
-    geom_text(aes(x = 1.5, y = max(filtered_data$value), label = paste0("p = ", signif(significant_results_log_est[[var]]$p.value, 2))), 
-              size = 5, hjust = 0.5, vjust = 1.5)
-  box_plots[[var]] <- plot
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(highest3_full)[2]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
   
-  # Create directory for the output files if it doesn't exist
-  if (!dir.exists("output_log_est")) {
-    dir.create("output_log_est")
-  }
+  # Plot 2
+  ggplot(highest3_full, aes(x = pseudo_chem$group, y = highest3_full[,3], fill = pseudo_chem$group)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(highest3_full)[3]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
   
-  # Save the box plot as PNG file in the output folder
-  filename <- paste0("output_log_est/", var, ".png")
-  ggsave(filename, plot = plot, width = 6, height = 4, dpi = 300)
+  # Plot 3
+  ggplot(highest3_full, aes(x = pseudo_chem$group, y = highest3_full[,4], fill = pseudo_chem$group)) + 
+    geom_boxplot() + 
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(highest3_full)[4]) + # main title
+    theme_minimal() + 
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 4
+  ggplot(lowest3_full, aes(x = pseudo_chem$group, y = lowest3_full[,2], fill = pseudo_chem$group)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(lowest3_full)[2]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 5
+  ggplot(lowest3_full, aes(x = pseudo_chem$group, y = lowest3_full[,3], fill = pseudo_chem$group)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(lowest3_full)[3]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 6
+  ggplot(lowest3_full, aes(x = pseudo_chem$group, y = lowest3_full[,4], fill = pseudo_chem$group)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(lowest3_full)[4]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # 3 columns and 2 rows
+  ncol = 3, 
+  nrow = 2
+)
+
+##======================= WILCOXON TEST ======================##
+wilcoxon_p <- c() # Initialize empty vector for p-values
+
+# Do "for loop" over selected column names
+for (i in names) {
+  
+  result <- wilcox.test(pseudo_chem[, i] ~ group,
+                        data = pseudo_chem)
+  
+  # Stores p-value to the vector with this column name
+  wilcoxon_p[[i]]  <- result$p.value
+  
 }
+
+#store metabolites with raw p-value in new dataframe
+wilcoxon_p <- data.frame(metabolites =  names(wilcoxon_p),
+                         p_raw = unlist(wilcoxon_p))
+wilcoxon_p$p_adjusted <- p.adjust(wilcoxon_p$p_raw, method = "fdr") #add column with p_adj for multiple testing
+
+# prepare a dataframe to plot p values
+df <- data.frame(x = c(wilcoxon_p$p_raw, wilcoxon_p$p_adjusted), 
+                 type=rep(c("raw", "fdr"),
+                          c(length(wilcoxon_p$p_raw),
+                            length(wilcoxon_p$p_adjusted))))
+
+# make a histrogram of p values and adjusted p values
+wilcoxon_plot <- ggplot(df) +
+  geom_histogram(aes(x=x, fill=type)) +
+  labs(x = "p-value", y = "Frequency") 
+
+wilcoxon_plot
+
+
+# Sorts p-values in decreasing order. Takes 3 first ones. Takes those rows that match
+# with p-values. Takes metabolites. 
+highest3 <- wilcoxon_p[wilcoxon_p$p_adjusted %in% sort(wilcoxon_p$p_adjusted, decreasing = TRUE)[1:3], ]$metabolites
+# From pseudo transformed table, takes only those metabolites that had highest p-values
+highest3_chem <- pseudo_chem[,colnames(pseudo_chem) %in% highest3]
+# Adds colData that includes patient status infomation
+highest3_full <- cbind(pseudo_chem$group, highest3_chem)
+
+# Sorts p-values in increasing order. Takes 3rd first ones. Takes those rows that match
+# with p-values. Takes metabolites. 
+lowest3 <- wilcoxon_p[wilcoxon_p$p_adjusted %in% sort(wilcoxon_p$p_adjusted, decreasing = FALSE)[1:3], ]$metabolites
+# From pseudo transformed table, takes only those metabolites that had highest p-values
+lowest3_chem <- pseudo_chem[,colnames(pseudo_chem) %in% lowest3]
+# Adds colData that includes patient status infomation
+lowest3_full <- cbind(pseudo_chem$group, lowest3_chem)
+
+# Puts plots in the same picture
+gridExtra::grid.arrange(
+  
+  # Plot 1
+  ggplot(highest3_full, aes(x = pseudo_chem$group, y = highest3_full[,2], fill = pseudo_chem$group)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(highest3_full)[2]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 2
+  ggplot(highest3_full, aes(x = pseudo_chem$group, y = highest3_full[,3], fill = pseudo_chem$group)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(highest3_full)[3]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 3
+  ggplot(highest3_full, aes(x = pseudo_chem$group, y = highest3_full[,4], fill = pseudo_chem$group)) + 
+    geom_boxplot() + 
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(highest3_full)[4]) + # main title
+    theme_minimal() + 
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 4
+  ggplot(lowest3_full, aes(x = pseudo_chem$group, y = lowest3_full[,2], fill = pseudo_chem$group)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(lowest3_full)[2]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 5
+  ggplot(lowest3_full, aes(x = pseudo_chem$group, y = lowest3_full[,3], fill = pseudo_chem$group)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(lowest3_full)[3]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 6
+  ggplot(lowest3_full, aes(x = pseudo_chem$group, y = lowest3_full[,4], fill = pseudo_chem$group)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "LLDEEP")), 
+                map_signif_level=TRUE) +
+    ylab("Metabolite intake") + # y axis title
+    ggtitle(names(lowest3_full)[4]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # 3 columns and 2 rows
+  ncol = 3, 
+  nrow = 2
+)
+
+
+##============================== VOLCANO PLOT OF DIFFERENTIAL ABUNDANCE ANALYSIS ===============================##
+#log2 transformation
+pseudo_chem_log2 <- log2(pseudo_chem[,1:1009])
+pseudo_chem_log2$group <- ifelse(chem_part$UMCGIBDResearchIDorLLDeepID %in% IBD_ID, "IBD", "LLDEEP")
+
+
+#calculate the mean of each metabolite in IBD group
+pseudo_chem_ibd <- filter(pseudo_chem_log2, pseudo_chem$group == 'IBD')
+IBD = apply(pseudo_chem_ibd[,1:1009], 2, mean)
+
+#calcuate the mean of each metabolite in LLDEEP group
+pseudo_chem_lldeep <- filter(pseudo_chem_log2, pseudo_chem$group == 'LLDEEP')
+LLDEEP = apply(pseudo_chem_lldeep[,1:1009], 2, mean)
+
+#because the data is already log2 transformed, take the difference between the means.
+foldchange <- LLDEEP - IBD
+hist(foldchange, xlab = "log2 Fold Change (IBD vs LLDEEP)")
+
+#add foldchange to df containing p-values
+wilcoxon_p$foldchange <- foldchange
+
+ggplot(data = wilcoxon_p, aes(x = foldchange, y = -1*log10(p_raw))) + 
+  geom_point()
