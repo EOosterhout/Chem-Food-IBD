@@ -21,6 +21,7 @@ library(writexl)
 library(ggpubr)
 library(FSA)
 library(ggsignif)
+library(ggrepel)
 #specific packages for PCA
 library(ggfortify)
 library(corrr)
@@ -513,13 +514,12 @@ gridExtra::grid.arrange(
 pseudo_chem_log2 <- log2(pseudo_chem[,1:1009])
 pseudo_chem_log2$group <- ifelse(chem_part$UMCGIBDResearchIDorLLDeepID %in% IBD_ID, "IBD", "LLDEEP")
 
-
 #calculate the mean of each metabolite in IBD group
-pseudo_chem_ibd <- filter(pseudo_chem_log2, pseudo_chem$group == 'IBD')
+pseudo_chem_ibd <- filter(pseudo_chem_log2, pseudo_chem_log2$group == 'IBD')
 IBD = apply(pseudo_chem_ibd[,1:1009], 2, mean)
 
 #calcuate the mean of each metabolite in LLDEEP group
-pseudo_chem_lldeep <- filter(pseudo_chem_log2, pseudo_chem$group == 'LLDEEP')
+pseudo_chem_lldeep <- filter(pseudo_chem_log2, pseudo_chem_log2$group == 'LLDEEP')
 LLDEEP = apply(pseudo_chem_lldeep[,1:1009], 2, mean)
 
 #because the data is already log2 transformed, take the difference between the means.
@@ -529,5 +529,22 @@ hist(foldchange, xlab = "log2 Fold Change (IBD vs LLDEEP)")
 #add foldchange to df containing p-values
 wilcoxon_p$foldchange <- foldchange
 
-ggplot(data = wilcoxon_p, aes(x = foldchange, y = -1*log10(p_raw))) + 
-  geom_point()
+# add a column of NAs
+wilcoxon_p$intakediff <- "NO"
+# if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
+wilcoxon_p$intakediff[wilcoxon_p$foldchange > 0.6 & wilcoxon_p$p_raw < 0.05] <- "UP"
+# if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
+wilcoxon_p$intakediff[wilcoxon_p$foldchange < -0.6 & wilcoxon_p$p_raw < 0.05] <- "DOWN"
+
+# Now write down the name of genes beside the points...
+# Create a new column "label" to de, that will contain the name of metabolites where intake is different between groups (NA in case they are not)
+wilcoxon_p$label <- NA
+wilcoxon_p$label[wilcoxon_p$intakediff != "NO"] <- wilcoxon_p$metabolites[wilcoxon_p$intakediff != "NO"]
+
+ggplot(wilcoxon_p, aes(x=foldchange, y=-1*log10(p_raw), col=intakediff, label=label)) + 
+  geom_point() + 
+  theme_minimal() +
+  geom_vline(xintercept=c(-0.6, 0.6), col="red") +
+  geom_hline(yintercept=-log10(0.05), col="red") + 
+  geom_text_repel(size = 2)
+ 
