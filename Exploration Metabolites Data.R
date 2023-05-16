@@ -119,17 +119,25 @@ write.table(SCFA_ID, file = 'SCFA_mtb_measured.txt')
 fecal_mtb <- cbind(all_new_ID, SCFA_ID)
 write.table(fecal_mtb, file = 'fecal_full_mtb_measured.txt')
 
-##=================================== LOAD DIET DATA AND FILTER PAIRED METABOLOMICS ====================================##
+##=================================== LOAD INTAKE METABOLITES AND FILTER PAIRED METABOLOMICS ===========================##
 
-#diet data
-diet= read.delim("diet_raw_v2.txt", header=T)
+#intake data
+chem <- read_xlsx('chem_raw_participant_V2.xlsx')
 
-LLD_diet <- diet[diet$UMCGIBDResearchIDorLLDeepID %like% 'LLDeep',] #only selecting LLDEEP samples
-row.names(LLD_diet)=LLD_diet$UMCGIBDResearchIDorLLDeepID
+LLD_chem <- chem[chem$UMCGIBDResearchIDorLLDeepID %like% 'LLDeep',] #only selecting LLDEEP samples
+row.names(LLD_chem)=LLD_chem$UMCGIBDResearchIDorLLDeepID
 
 #samples with paired metabolomics data
 Samples_LLD=row.names(blood_mtb)[(row.names(blood_mtb) %in% row.names(fecal_mtb))]
-#subset diet, fecal and blood data
-LLD_mtbdiet <- subset(diet, diet$UMCGIBDResearchIDorLLDeepID %in% Samples_LLD)
-LLD_mtbfecal <- subset(all_new_ID, row.names(all_new_ID) %in% Samples_LLD)
-LLD_mtbblood <- subset(blood_mtb, row.names(blood_mtb) %in% Samples_LLD)
+#samples with intake, fecal and blood metabolomics data
+Complete_LLD <- chem$UMCGIBDResearchIDorLLDeepID[chem$UMCGIBDResearchIDorLLDeepID %in% Samples_LLD]
+#subset intake, fecal and blood data
+LLD_mtbfecal <- subset(all_new_ID, row.names(all_new_ID) %in% Complete_LLD)
+write.csv(LLD_mtbfecal, file = 'LLD_pairedmtb_fecal.csv')
+LLD_mtbblood <- subset(blood_mtb, row.names(blood_mtb) %in% Complete_LLD)
+write.csv(LLD_mtbblood, file = 'LLD_pairedmtb_blood.csv')
+LLD_mtbintake <- subset(chem, chem$UMCGIBDResearchIDorLLDeepID %in% Complete_LLD)
+write.csv(LLD_mtbintake, file = 'LLD_pairedmtb_intake.csv')
+
+
+
