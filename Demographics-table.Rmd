@@ -1,0 +1,108 @@
+---
+title: "Demographics table"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+###     SCRIPT: MARKDOWN SUMMARY STATISTICS 
+###     AUTHOR: Emily Oosterhout
+###     DESCRIPTION: MARKDOWN FOR PRODUCING A WORD TABLE WITH THE SUMMARY STATISTICS OF 
+###     NOTE(S): USE IN COMBINATION WITH "metadata_clean.xlsx"
+##Contents of this file
+## 0. LOAD CLEANED DATA
+## 1. CREATE TABLE FUNCTIONS
+## 2. CONVERT INTO A TABLE GROUPED BY DIAGNOSIS
+## 3. COMPUTE P-VALUES FOR GROUP DIFFERENCES
+## 4. ADD P-VALUES TO THE TABLE
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse) #includes dplyr and other useful functions for sorting data
+library(readxl) #read excel files
+library(qwraps2) #package for making the tables
+options(qwraps2_markup = "markdown") #option so that qwraps2 uses R markdown instead of LaTeX, required for knitting the table
+```
+
+```{r load_data, include=FALSE}
+## =============== 0. LOAD CLEANED DATA   ================ ##
+MD <-read_xlsx("metadata_clean.xlsx")
+MD <- as.data.frame(MD)
+```
+
+
+```{r create_table_functions, echo = FALSE}
+## ============ 1. CREATE TABLE FUNCTIONS (qwraps2)  ============ ##
+summary_statistics <-
+  list( 
+    "Age" = 
+      list ("Mean (sd)" = ~ qwraps2::mean_sd(AgeAtFecalSampling, na_rm = TRUE, 
+                                               denote_sd = "paren"),
+            "Minimum" = ~min(AgeAtFecalSampling, na.rm = TRUE),
+            "Maximum" = ~max(AgeAtFecalSampling, na.rm = TRUE)
+      ),
+    "Gender, n (%)" = 
+      list(
+        "male" = ~qwraps2::n_perc(Sex == "male", digits = 1, na_rm = TRUE),
+        "female" = ~qwraps2::n_perc(Sex == "female", digits = 1, na_rm = TRUE)
+      ),
+    "BMI" =
+      list(
+        "Median (Q1, Q3)" = ~qwraps2::median_iqr(BMI, na_rm = TRUE),
+        "Minimum" = ~min(BMI, na.rm = TRUE),
+        "Maximum" = ~max(BMI, na.rm = TRUE)
+      ),
+    "Smoking status" =
+      list(
+        "Smoker" = ~qwraps2::n_perc(SmokeCurrentSmoker == "2", digits = 1, na_rm = TRUE),
+        "Non-smoker" = ~qwraps2::n_perc(SmokeCurrentSmoker == "1", digits = 1, na_rm = TRUE)
+    ),
+    "Medication types used, n (%)" =
+      list(
+        "Mesalazines" = ~qwraps2::n_perc(MedicationMesalazines == "2", digits = 1, na_rm = TRUE),
+        "Steroids" = ~qwraps2::n_perc(MedicationSteroids == "2", digits = 1, na_rm = TRUE),
+        "Immunosuppressants" = ~qwraps2::n_perc(MedicationImmu0suppressants == "2", digits = 1, na_rm = TRUE),
+        "AntiTNF" = ~qwraps2::n_perc(MedicationAntiTNF == "2", digits = 1, na_rm = TRUE),
+        "Antibiotics" = ~qwraps2::n_perc(MedicationAntibiotics == "2", digits = 1, na_rm = TRUE),
+        "Vitamins" = ~qwraps2::n_perc(MedicationVitamins == "2", digits = 1, na_rm = TRUE),
+        "Minerals" = ~qwraps2::n_perc(MedicationMinerals == "2", digits = 1, na_rm = TRUE),
+        "PPI" = ~qwraps2::n_perc(MedicationPPI == "2", digits = 1, na_rm = TRUE)
+      )
+    )
+    
+```
+
+```{r display_table, echo=FALSE, results = "asis"}
+## ======= 2. CONVERT INTO A TABLE GROUPED BY DIAGNOSIS  ======= ##
+table_by_diagnosis <- summary_table(MD %>% dplyr::group_by(group), summary_statistics)
+#table_by_diagnosis
+```
+
+``` {r pval, echo=FALSE}
+## ===== 3. COMPUTE P-VALUES FOR GROUP DIFFERENCES  ===== ##
+#Compute the p-values for categorical data (Chi-square test)
+Gender_pvalue <- frmtp(chisq.test(MD$group, MD$Sex)$p.value)
+Smoking_pvalue <- frmtp(chisq.test(MD$group, MD$SmokeCurrentSmoker)$p.value)
+#Compute the p-values for normally distributed continuous data (t-test)
+Age_pvalue <- frmtp(t.test(AgeAtFecalSampling ~ group, data = MD, paired=FALSE)$p.value)
+#Compute the p-values for non-normally distributed continuous data (Wilcoxon Rank Sum test)
+BMI_pvalue <- frmtp(wilcox.test(BMI ~ group, data = MD, paired=FALSE)$p.value)
+```
+
+```{r pval_table, echo=FALSE, results = "asis"}
+## ====== 4. ADD P-VALUES TO THE TABLE  ====== ##
+#Add an additional column in the table for the p-values
+table_by_diagnosis <- cbind(table_by_diagnosis, "P-value" = "")
+
+#add the p-values that should be placed next to the summary statistics
+table_by_diagnosis[grepl("Mean..sd.", rownames(table_by_diagnosis)), "P-value"] <- Age_pvalue
+
+#add the p-values that should be placed next to the group row names
+printed_table <- capture.output(print(table_by_diagnosis))
+printed_table[grepl("Gender", printed_table)] <-
+  sub("&nbsp;&nbsp;\\ \\|$", paste(Gender_pvalue, "|"), printed_table[grepl("Gender", printed_table)])
+printed_table[grepl("BMI", printed_table)] <-
+  sub("&nbsp;&nbsp;\\ \\|$", paste(BMI_pvalue, "|"), printed_table[grepl("BMI", printed_table)])
+printed_table[grepl("Smoking status", printed_table)] <-
+  sub("&nbsp;&nbsp;\\ \\|$", paste(Smoking_pvalue, "|"), printed_table[grepl("Smoking status", printed_table)])
+
+#display the table (only works properly when knitting in RMarkdown)
+cat(printed_table, sep = "\n")
+```
