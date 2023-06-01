@@ -68,16 +68,23 @@ remove_outliers <- function(data, group_var) {
   return(result)
 }
 
-##=========================================== LOAD DATA AND SUBSETTING ===============================
+##=========================================== LOAD DATA, CLEANING NAMES AND SUBSETTING ===============================
 
 data_full <- read_xlsx('analysis_table.xlsx')
+plausible_intake <- data_full %>% filter(between(SUMOFKCAL, 800, 5000)) # filter on plausible intake (800 < intake < 5000)
 
+# Get metabolite data from analysis table using participant list from raw metabolite files
 intake <- read_xlsx('chem_raw_participant_V2.xlsx')
-intake_mtb <- intake[,7:1114]
 fecal <- read_xlsx('fecal_mtb.xlsx')
-fecal_mtb <- fecal[,2:1693]
 serum <- read_xlsx("blood_mtb_measured.xlsx")
-serum_mtb <- serum[,2:1184]
+
+participants_intake <- as.character(intake$UMCGIBDResearchIDorLLDeepID)
+participants_fecal <- as.character(fecal$UMCGIBDResearchIDorLLDeepID)
+participants_serum <- as.character(serum$UMCGIBDResearchIDorLLDeepID)
+
+intake_mtb <- plausible_intake[plausible_intake$UMCGIBDResearchIDorLLDeepID %in% participants_intake,]
+fecal_mtb <- plausible_intake[plausible_intake$UMCGIBDResearchIDorLLDeepID %in% participants_fecal,]
+serum_mtb <- plausible_intake[plausible_intake$UMCGIBDResearchIDorLLDeepID %in% participants_serum,]
 
 #clean compound names, intake metabolites
 names(intake_mtb) = gsub(pattern = ":", replacement = "_", x = names(intake_mtb))
@@ -88,29 +95,25 @@ names(intake_mtb) = gsub(pattern = '"', replacement = "", x = names(intake_mtb))
 names(intake_mtb) = gsub(pattern = "\\|.*", replacement = "", x = names(intake_mtb))
 names(intake_mtb) = gsub(pattern = "\\(", replacement = "", x = names(intake_mtb))
 names(intake_mtb) = gsub(pattern = "\\)", replacement = "", x = names(intake_mtb))
-
-#Adding letter to numeric column names
-old_colnames <- colnames(intake_mtb)
-# Replace numeric column names with letters
-new_colnames <- make.names(old_colnames, unique = TRUE)
-# Assign new column names to the data frame
-colnames(intake_mtb) <- new_colnames
+names(intake_mtb) = gsub(pattern = "\\+", replacement = "pos", x = names(intake_mtb))
+names(intake_mtb) = gsub(pattern = "\\'", replacement = "", x = names(intake_mtb))
 
 ##===================================== DIFFERENTIAL ABUNDANCE ANALYSIS: INTAKE_IBDvsNon-IBD (LOG TRANSFORMED AND FILTERED DATA) ====================================================
 
+# Columns containing intake metabolites
+intake_cols <- grep("^int_", names(intake_mtb), value = TRUE)
+metabolites_intake <- intake_mtb[,colnames(intake_mtb) %in% intake_cols]
+
 # Calculate the percentage of non-zero values for each variable
-non_zero_pct <- apply(intake_mtb != 0, 2, mean)
+non_zero_pct <- apply(metabolites_intake != 0, 2, mean)
 # Filter variables with at least a non-zero value in 20% of the data
-filter_20pct <- intake_mtb[,non_zero_pct >= 0.2]
+filter_20pct <- metabolites_intake[,non_zero_pct >= 0.2]
 
 #add pseudocount to all variables
 pseudo <- filter_20pct + 1
 
-#Filter full analysis_table on participants containing intake data
-data_intake <- data_full[data_full$UMCGIBDResearchIDorLLDeepID %in% intake$UMCGIBDResearchIDorLLDeepID,]
-
 # Create a new column specifying IBD (yes/no) for each sample
-pseudo_diagnosis <- cbind(data_intake$diagnosis, pseudo)
+pseudo_diagnosis <- cbind(intake_mtb$diagnosis, pseudo)
 names(pseudo_diagnosis)[1] <- 'diagnosis'
 
 #pseudo_clean <- remove_outliers(pseudo_diagnosis, 'diagnosis')
@@ -148,7 +151,6 @@ wilcoxon_plot
 
 
 ##============================== VOLCANO PLOT OF DIFFERENTIAL ABUNDANCE ANALYSIS ===============================##
-wilcoxon_p <- na.omit(wilcoxon_p)
 
 #log2 transformation
 intake_log <- log2(pseudo_diagnosis[,2:1010])
@@ -293,19 +295,20 @@ gridExtra::grid.arrange(
 
 ##===================================== DIFFERENTIAL ABUNDANCE ANALYSIS: INTAKE_CALPROTECTIN >150 vs <150 (LOG TRANSFORMED AND FILTERED DATA) ====================================================
 
+# Columns containing intake metabolites
+intake_cols <- grep("^int_", names(intake_mtb), value = TRUE)
+metabolites_intake <- intake_mtb[,colnames(intake_mtb) %in% intake_cols]
+
 # Calculate the percentage of non-zero values for each variable
-non_zero_pct <- apply(intake_mtb != 0, 2, mean)
+non_zero_pct <- apply(metabolites_intake != 0, 2, mean)
 # Filter variables with at least a non-zero value in 20% of the data
-filter_20pct <- intake_mtb[,non_zero_pct >= 0.2]
+filter_20pct <- metabolites_intake[,non_zero_pct >= 0.2]
 
 #add pseudocount to all variables
 pseudo <- filter_20pct + 1
 
-#Filter full analysis_table on participants containing intake data
-data_intake <- data_full[data_full$UMCGIBDResearchIDorLLDeepID %in% intake$UMCGIBDResearchIDorLLDeepID,]
-
-# Create a new column specifying IBD (yes/no) for each sample
-pseudo_calprotectin <- cbind(data_intake$calprotectin_above150, pseudo)
+# Create a new column specifying calprotectin >150 (yes/no) for each sample
+pseudo_calprotectin <- cbind(intake_mtb$calprotectin_above150, pseudo)
 names(pseudo_calprotectin)[1] <- 'calprotectin_above150'
 
 #pseudo_clean <- remove_outliers(pseudo_diagnosis, 'diagnosis')
@@ -503,29 +506,30 @@ intake_mtb_2 <- intake_mtb_1[,colnames(intake_mtb_1) %in% intakedifference_calpr
 
 ##========================================== LINEAR REGRESSION: IBD vs NON-IBD ========================================
 
+# Columns containing intake metabolites
+intake_cols <- grep("^int_", names(intake_mtb), value = TRUE)
+metabolites_intake <- intake_mtb[,colnames(intake_mtb) %in% intake_cols]
+
 # Calculate the percentage of non-zero values for each variable
-non_zero_pct <- apply(intake_mtb != 0, 2, mean)
+non_zero_pct <- apply(metabolites_intake != 0, 2, mean)
 # Filter variables with at least a non-zero value in 20% of the data
-filter_20pct <- intake_mtb[,non_zero_pct >= 0.2]
+filter_20pct <- metabolites_intake[,non_zero_pct >= 0.2]
 
 #add pseudocount to all variables
 pseudo <- filter_20pct + 1
 
-#Filter full analysis_table on participants containing intake data
-data_intake <- data_full[data_full$UMCGIBDResearchIDorLLDeepID %in% intake$UMCGIBDResearchIDorLLDeepID,]
-
 # Create a new column specifying IBD (yes/no) for each sample
-pseudo_diagnosis <- cbind(data_intake$diagnosis, pseudo)
+pseudo_diagnosis <- cbind(intake_mtb$diagnosis, pseudo)
 names(pseudo_diagnosis)[1] <- 'diagnosis'
 
 # Add covariates to df
-pseudo_diagnosis <- cbind(age = data_intake$age, pseudo_diagnosis)
-pseudo_diagnosis <- cbind(sex = data_intake$sex, pseudo_diagnosis)
-pseudo_diagnosis <- cbind(BMI = data_intake$BMI, pseudo_diagnosis)
+pseudo_diagnosis <- cbind(age = intake_mtb$age, pseudo_diagnosis)
+pseudo_diagnosis <- cbind(sex = intake_mtb$sex, pseudo_diagnosis)
+pseudo_diagnosis <- cbind(BMI = intake_mtb$BMI, pseudo_diagnosis)
 
 #============LINEAR REGRESSION ==============#
 #dependent variable: individual diet metabolites
-#predictor variables: covariates(age, sex, BMI), caloric intake, IBD(yes/no)
+#predictor variables: covariates(age, sex, BMI), IBD(yes/no)
 
 #columns with intake data + predictor variables
 intake_metabolites <- colnames(pseudo_diagnosis[,5:1013])
@@ -608,6 +612,7 @@ ggplot(plot.data, aes(x = Var1, y = Var2)) +
   theme(axis.text.x=element_text(angle = -45, hjust = 0, size=1)) + 
   theme(axis.text.y=element_text(angle = 0, hjust = 1, size=1)) +
   theme(plot.title = element_text(hjust = 0.5, size = 5))
+
 
 
 
