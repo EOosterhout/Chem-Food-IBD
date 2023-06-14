@@ -22,9 +22,11 @@ library(FSA)
 library(ggsignif)
 library(ggrepel)
 library(RColorBrewer)
+library(gridExtra)
 
 #packages for linear regression/statistical testing
 library(stats)
+library(outliers)
 
 #packages for correlation analysis
 library(Hmisc)
@@ -37,11 +39,43 @@ library(corrplot)
 
 ## Functions ##
 
+# Function to set outliers as NA within each column using Tukey's fences
+remove_outliers <- function(data, multiplier = 1.5) {
+  cleaned_data <- data
+  
+  # Loop through each column in the dataframe
+  for (col in names(data)) {
+    # Calculate the lower and upper fences
+    q1 <- quantile(data[[col]], 0.25, na.rm = TRUE)
+    q3 <- quantile(data[[col]], 0.75, na.rm = TRUE)
+    iqr <- q3 - q1
+    lower_fence <- q1 - multiplier * iqr
+    upper_fence <- q3 + multiplier * iqr
+    
+    # Identify values outside the fences
+    outliers <- data[[col]] < lower_fence | data[[col]] > upper_fence
+    
+    # Set outliers as NA in the dataframe
+    cleaned_data[[col]][outliers] <- NA
+  }
+  
+  return(cleaned_data)
+}
+
 
 ##=========================================== LOAD DATA, CLEANING NAMES AND SUBSETTING ===============================
 
 data_full <- read_xlsx('analysis_table.xlsx')
-plausible_intake <- data_full %>% filter(between(SUMOFKCAL, 800, 5000)) # filter on plausible intake (800 < intake < 5000)
+
+# Subset full dataset on plausible intake (sex dependent Willet)
+intake_male <- subset(data_full, data_full$sex == 'male')
+plausible_intake_male<- intake_male %>% filter(between(SUMOFKCAL, 800, 4000)) # filter on plausible intake (800 < intake < 4000)
+
+intake_female<- subset(data_full, data_full$sex == 'female')
+plausible_intake_female<- intake_female %>% filter(between(SUMOFKCAL, 500, 3500)) # filter on plausible intake (500 < intake < 3500)
+
+#bind plausible intake (1641/1983)
+plausible_intake <- rbind(plausible_intake_male, plausible_intake_female)
 
 # Get metabolite data from analysis table using participant list from raw metabolite files
 intake <- read_xlsx('chem_raw_participant_V2.xlsx')
@@ -489,9 +523,19 @@ filter_20pct <- metabolites_intake[,non_zero_pct >= 0.2]
 
 #add pseudocount to all variables
 pseudo <- filter_20pct + 1
+colnames(pseudo) <- make.unique(colnames(pseudo), sep = "_") #make sure that column names are all unique
+
+# Apply the remove_outliers function to set outliers as NA within each column
+pseudo_clean <- remove_outliers(pseudo)
+
+#LOG transformation or RANK transformation
+pseudo_log <- log2(pseudo_clean)
+pseudo_rank <- pseudo_clean %>% mutate_all(~ (length(.) + 1) - rank(.))
 
 # Create a new column specifying IBD (yes/no) for each sample
-pseudo_diagnosis <- cbind(diagnosis = intake_mtb$diagnosis, pseudo)
+pseudo_diagnosis <- cbind(diagnosis = intake_mtb$diagnosis, pseudo_clean)
+pseudo_diagnosis <- cbind(diagnosis = intake_mtb$diagnosis, pseudo_log)
+pseudo_diagnosis <- cbind(diagnosis = intake_mtb$diagnosis, pseudo_rank)
 
 # Add covariates to df
 pseudo_diagnosis <- cbind(age = intake_mtb$age, pseudo_diagnosis)
@@ -503,8 +547,7 @@ pseudo_diagnosis <- cbind(BMI = intake_mtb$BMI, pseudo_diagnosis)
 #predictor variables: covariates(age, sex, BMI), IBD(yes/no)
 
 #columns with intake data + predictor variables
-metabolite_names <- names(pseudo_diagnosis[,5:1013])
-metabolite_names
+metabolite_names <- names(pseudo_diagnosis[,5:996])
 predictor_vars <- c('age', 'sex', 'BMI', 'diagnosis')
 
 # Create an empty dataframe to store results
@@ -515,45 +558,148 @@ results_df <- data.frame(Intake_Metabolite = character(),
                          stringsAsFactors = FALSE)
 
 # Perform linear regression over intake_metabolites using a for loop
+# Perform linear regression for each dependent variable
 for (dep_var in metabolite_names) {
   # Create formula
   formula <- paste(dep_var, paste(predictor_vars, collapse = " + "), sep = " ~ ")
   
-  tryCatch({
-    # Perform linear regression
-    regression_model <- lm(formula, data = pseudo_diagnosis)
+  # Perform linear regression
+  regression_model <- lm(formula, data = pseudo_diagnosis)
+  
+  # Extract coefficient estimates, p-values, and R-squared value
+  coefficients <- coef(regression_model)
+  p_values <- summary(regression_model)$coefficients[, "Pr(>|t|)"]
+  r_squared <- summary(regression_model)$r.squared
+  
+  # Filter significant coefficients (p-value < 0.05)
+  significant_coeffs <- coefficients[p_values < 0.05]
+  significant_pvalues <- p_values[p_values < 0.05]
+  
+  # Create a dataframe for the results
+  if (length(significant_coeffs) > 0) {
+    results <- data.frame(Intake_Metabolite = dep_var,
+                          Coefficient = names(significant_coeffs),
+                          PValue = significant_pvalues,
+                          RSquared = r_squared,
+                          stringsAsFactors = FALSE)
     
-    # Extract significant coefficients and p-values
-    coefficients <- coef(regression_model)
-    p_values <- summary(regression_model)$coefficients[, 4]
-    
-    # Extract R-squared value
-    r_squared <- summary(regression_model)$r.squared
-    
-    # Filter significant coefficients (p-value < 0.05)
-    significant_coeffs <- coefficients[p_values < 0.05]
-    
-    # Check if there are any significant coefficients
-    if (length(significant_coeffs) > 0) {
-      # Create a dataframe for the results
-      results <- data.frame(Intake_Metabolite = dep_var,
-                            Coefficient = names(significant_coeffs),
-                            PValue = significant_coeffs,
-                            RSquared = r_squared,
-                            stringsAsFactors = FALSE)
-      
-      # Append results to the main dataframe
-      results_df <- rbind(results_df, results)
-    }
-  }, error = function(e) {
-    # Skip the dependent variable and continue to the next iteration
-    message(paste("Skipping", dep_var, "due to an error:", conditionMessage(e)))
-  })
+    # Append results to the main dataframe
+    results_df <- rbind(results_df, results)
+  }
 }
 
 # Filter results df on significant coefficients 'diagnosis'
 linreg_diagnosis <- results_df[results_df$Coefficient == 'diagnosisIBD',]
 linreg_diagnosis$p_adjusted <- p.adjust(linreg_diagnosis$PValue, method = "fdr") #add column with p_adj for multiple testing
+
+##============================== VOLCANO PLOT OF LINREG_DIAGNOSIS ===============================##
+
+ggplot(linreg_diagnosis, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Metabolite)) + 
+  geom_point() + 
+  theme_minimal() +
+  theme(legend.position = 'bottom') +
+  scale_color_manual(values=c("#999999", "#009E73")) +
+  geom_text_repel(size = 2) +
+  scale_x_continuous(name = 'R Squared (diagnosis)')
+
+##================================================= SIGNIFICANT INTAKE DIFFERENCE (IBD vs NON-IBD) BASED ON FOLDCHANGE ==============================================##
+
+# Sorts pvalue in increasing order. Takes 6 first ones. Takes those rows that match
+# with foldchange. Takes metabolites. 
+highest6 <- linreg_diagnosis[linreg_diagnosis$PValue %in% sort(linreg_diagnosis$PValue, decreasing = FALSE)[1:6], ]$Intake_Metabolite
+# From intake table, takes only those metabolites that had highest foldchange
+highest6_chem <- pseudo_diagnosis[,colnames(pseudo_diagnosis) %in% highest6]
+# Adds colData that includes patient status information
+highest6_full <- cbind(pseudo_diagnosis$diagnosis, highest6_chem)
+names(highest6_full)[1] <- 'diagnosis'
+highest6_full <- na.omit(highest6_full)
+
+# Puts plots in the same picture
+gridExtra::grid.arrange(
+  
+  # Plot 1
+  ggplot(highest6_full, aes(x = diagnosis, y = highest6_full[,2], fill = diagnosis)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "control")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[2]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 2
+  ggplot(highest6_full, aes(x = diagnosis, y = highest6_full[,3], fill = diagnosis)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "control")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[3]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 3
+  ggplot(highest6_full, aes(x = diagnosis, y = highest6_full[,4], fill = diagnosis)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "control")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[4]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 4
+  ggplot(highest6_full, aes(x = diagnosis, y = highest6_full[,5], fill = diagnosis)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "control")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[5]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 5
+  ggplot(highest6_full, aes(x = diagnosis, y = highest6_full[,6], fill = diagnosis)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "control")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[6]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 6
+  ggplot(highest6_full, aes(x = diagnosis, y = highest6_full[,7], fill = diagnosis)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("IBD", "control")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[7]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # 3 columns and 2 rows
+  ncol = 3, 
+  nrow = 2
+)
+
 
 ##========================================== LINEAR REGRESSION: >150 CALPROTECTIN vs <150 CALPROTECTIN ========================================
 
@@ -566,11 +712,18 @@ non_zero_pct <- apply(metabolites_intake != 0, 2, mean)
 # Filter variables with at least a non-zero value in 20% of the data
 filter_20pct <- metabolites_intake[,non_zero_pct >= 0.2]
 
-#add pseudocount to all variables
+#add pseudocount to all variables + LOG Transformation
 pseudo <- filter_20pct + 1
+colnames(pseudo) <- make.unique(colnames(pseudo), sep = "_") #make sure that column names are all unique
+
+#LOG transformation or RANK transformation
+pseudo_log <- log2(pseudo)
+pseudo_rank <- pseudo %>% mutate_all(~ (length(.) + 1) - rank(.))
 
 # Create a new column specifying IBD (yes/no) for each sample
 pseudo_calprotectin <- cbind(calprotectin_above150 = intake_mtb$calprotectin_above150, pseudo)
+pseudo_calprotectin <- cbind(calprotectin_above150 = intake_mtb$calprotectin_above150, pseudo_log)
+pseudo_calprotectin <- cbind(calprotectin_above150 = intake_mtb$calprotectin_above150, pseudo_rank)
 
 # Add covariates to df
 pseudo_calprotectin <- cbind(age = intake_mtb$age, pseudo_calprotectin)
@@ -583,7 +736,6 @@ pseudo_calprotectin <- cbind(BMI = intake_mtb$BMI, pseudo_calprotectin)
 
 #columns with intake data + predictor variables
 metabolite_names <- names(pseudo_calprotectin[,5:1013])
-metabolite_names
 predictor_vars <- c('age', 'sex', 'BMI', 'calprotectin_above150')
 
 # Create an empty dataframe to store results
@@ -594,45 +746,49 @@ results_df <- data.frame(Intake_Metabolite = character(),
                          stringsAsFactors = FALSE)
 
 # Perform linear regression over intake_metabolites using a for loop
+# Perform linear regression for each dependent variable
 for (dep_var in metabolite_names) {
   # Create formula
   formula <- paste(dep_var, paste(predictor_vars, collapse = " + "), sep = " ~ ")
   
-  tryCatch({
-    # Perform linear regression
-    regression_model <- lm(formula, data = pseudo_calprotectin)
+  # Perform linear regression
+  regression_model <- lm(formula, data = pseudo_calprotectin)
+  
+  # Extract coefficient estimates, p-values, and R-squared value
+  coefficients <- coef(regression_model)
+  p_values <- summary(regression_model)$coefficients[, "Pr(>|t|)"]
+  r_squared <- summary(regression_model)$r.squared
+  
+  # Filter significant coefficients (p-value < 0.05)
+  significant_coeffs <- coefficients[p_values < 0.05]
+  significant_pvalues <- p_values[p_values < 0.05]
+  
+  # Create a dataframe for the results
+  if (length(significant_coeffs) > 0) {
+    results <- data.frame(Intake_Metabolite = dep_var,
+                          Coefficient = names(significant_coeffs),
+                          PValue = significant_pvalues,
+                          RSquared = r_squared,
+                          stringsAsFactors = FALSE)
     
-    # Extract significant coefficients and p-values
-    coefficients <- coef(regression_model)
-    p_values <- summary(regression_model)$coefficients[, 4]
-    
-    # Extract R-squared value
-    r_squared <- summary(regression_model)$r.squared
-    
-    # Filter significant coefficients (p-value < 0.05)
-    significant_coeffs <- coefficients[p_values < 0.05]
-    
-    # Check if there are any significant coefficients
-    if (length(significant_coeffs) > 0) {
-      # Create a dataframe for the results
-      results <- data.frame(Intake_Metabolite = dep_var,
-                            Coefficient = names(significant_coeffs),
-                            PValue = significant_coeffs,
-                            RSquared = r_squared,
-                            stringsAsFactors = FALSE)
-      
-      # Append results to the main dataframe
-      results_df <- rbind(results_df, results)
-    }
-  }, error = function(e) {
-    # Skip the dependent variable and continue to the next iteration
-    message(paste("Skipping", dep_var, "due to an error:", conditionMessage(e)))
-  })
+    # Append results to the main dataframe
+    results_df <- rbind(results_df, results)
+  }
 }
 
 # Filter results df on significant coefficients 'calprotectin_above150'
 linreg_calprotectin <- results_df[results_df$Coefficient == 'calprotectin_above150yes',]
 linreg_calprotectin$p_adjusted <- p.adjust(linreg_calprotectin$PValue, method = "fdr") #add column with p_adj for multiple testing
+
+##============================== VOLCANO PLOT OF LINREG_CALPROTECTIN ===============================##
+
+ggplot(linreg_calprotectin, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Metabolite)) + 
+  geom_point() + 
+  theme_minimal() +
+  theme(legend.position = 'bottom') +
+  scale_color_manual(values=c("#999999", "#009E73")) +
+  geom_text_repel(size = 2) +
+  scale_x_continuous(name = 'R Squared (calprotectin)')
 
 ##========================================== LINEAR REGRESSION: BEFORE A FLARE vs DURING/AFTER A FLARE ========================================
 
@@ -647,9 +803,16 @@ filter_20pct <- metabolites_intake[,non_zero_pct >= 0.2]
 
 #add pseudocount to all variables
 pseudo <- filter_20pct + 1
+colnames(pseudo) <- make.unique(colnames(pseudo), sep = "_") #make sure that column names are all unique
+
+#LOG transformation or RANK transformation
+pseudo_log <- log2(pseudo)
+pseudo_rank <- pseudo %>% mutate_all(~ (length(.) + 1) - rank(.))
 
 # Create a new column specifying IBD (yes/no) for each sample
 pseudo_flare <- cbind(before_a_flare = intake_mtb$before_a_flare, pseudo)
+pseudo_flare <- cbind(before_a_flare = intake_mtb$before_a_flare, pseudo_log)
+pseudo_flare <- cbind(before_a_flare = intake_mtb$before_a_flare, pseudo_rank)
 
 # Add covariates to df
 pseudo_flare <- cbind(age = intake_mtb$age, pseudo_flare)
@@ -672,42 +835,151 @@ results_df <- data.frame(Intake_Metabolite = character(),
                          stringsAsFactors = FALSE)
 
 # Perform linear regression over intake_metabolites using a for loop
+# Perform linear regression for each dependent variable
 for (dep_var in metabolite_names) {
   # Create formula
   formula <- paste(dep_var, paste(predictor_vars, collapse = " + "), sep = " ~ ")
   
-  tryCatch({
-    # Perform linear regression
-    regression_model <- lm(formula, data = pseudo_flare)
+  # Perform linear regression
+  regression_model <- lm(formula, data = pseudo_flare)
+  
+  # Extract coefficient estimates, p-values, and R-squared value
+  coefficients <- coef(regression_model)
+  p_values <- summary(regression_model)$coefficients[, "Pr(>|t|)"]
+  r_squared <- summary(regression_model)$r.squared
+  
+  # Filter significant coefficients (p-value < 0.05)
+  significant_coeffs <- coefficients[p_values < 0.05]
+  significant_pvalues <- p_values[p_values < 0.05]
+  
+  # Create a dataframe for the results
+  if (length(significant_coeffs) > 0) {
+    results <- data.frame(Intake_Metabolite = dep_var,
+                          Coefficient = names(significant_coeffs),
+                          PValue = significant_pvalues,
+                          RSquared = r_squared,
+                          stringsAsFactors = FALSE)
     
-    # Extract significant coefficients and p-values
-    coefficients <- coef(regression_model)
-    p_values <- summary(regression_model)$coefficients[, 4]
-    
-    # Extract R-squared value
-    r_squared <- summary(regression_model)$r.squared
-    
-    # Filter significant coefficients (p-value < 0.05)
-    significant_coeffs <- coefficients[p_values < 0.05]
-    
-    # Check if there are any significant coefficients
-    if (length(significant_coeffs) > 0) {
-      # Create a dataframe for the results
-      results <- data.frame(Intake_Metabolite = dep_var,
-                            Coefficient = names(significant_coeffs),
-                            PValue = significant_coeffs,
-                            RSquared = r_squared,
-                            stringsAsFactors = FALSE)
-      
-      # Append results to the main dataframe
-      results_df <- rbind(results_df, results)
-    }
-  }, error = function(e) {
-    # Skip the dependent variable and continue to the next iteration
-    message(paste("Skipping", dep_var, "due to an error:", conditionMessage(e)))
-  })
+    # Append results to the main dataframe
+    results_df <- rbind(results_df, results)
+  }
 }
 
 # Filter results df on significant coefficients 'diagnosis'
 linreg_flare <- results_df[results_df$Coefficient == 'before_a_flareyes',]
 linreg_flare$p_adjusted <- p.adjust(linreg_flare$PValue, method = "fdr") #add column with p_adj for multiple testing
+
+##============================== VOLCANO PLOT OF LINREG_DIAGNOSIS ===============================##
+
+ggplot(linreg_flare, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Metabolite)) + 
+  geom_point() + 
+  theme_minimal() +
+  theme(legend.position = 'bottom') +
+  scale_color_manual(values=c("#999999", "#009E73")) +
+  geom_text_repel(size = 2) +
+  scale_x_continuous(name = 'R Squared (flare)')
+
+##================================================ ASSOCIATED DIET METABOLITES WITH CLINICAL OUTCOMES BASED ON LINEAR REGRESSION ====================================================##
+
+#Associated Diet Metabolite names based on DIAGNOSIS
+diagnosis <- as.character(linreg_diagnosis$Intake_Metabolite)
+
+#Associated Diet Metabolite names based on CALPROTECTIN
+calprotectin <- as.character(linreg_calprotectin$Intake_Metabolite)
+
+#Associated Diet Metabolite names based on CALPROTECTIN
+flare <- as.character(linreg_flare$Intake_Metabolite)
+
+#New df containing only diet metabolites that are associated with clinical outcomes
+## IBD vs Non-IBD
+## calprotectin <150 vs calprotectin >150
+## After/During Flare vs Before Flare
+intake_mtb_diagnosis <- pseudo_diagnosis[,colnames(pseudo_diagnosis) %in% diagnosis]
+intake_mtb_calprotectin <- pseudo_calprotectin[,colnames(pseudo_calprotectin) %in% calprotectin]
+intake_mtb_flare <- pseudo_flare[,colnames(pseudo_flare) %in% flare]
+
+
+##=========================== METABOLITES PRESENT FOR INTAKE, FECAL, SERUM ========================
+
+# Columns containing intake metabolites
+intake_cols <- grep("^int_", names(intake_mtb), value = TRUE)
+metabolites_intake <- intake_mtb[,colnames(intake_mtb) %in% intake_cols]
+
+# Columns containing fecal metabolites
+fecal_cols <- grep("^fec_", names(fecal_mtb), value = TRUE)
+metabolites_fecal <- fecal_mtb[,colnames(fecal_mtb) %in% fecal_cols]
+
+# Columns containing fecal metabolites
+serum_cols <- grep("^ser_", names(serum_mtb), value = TRUE)
+metabolites_serum <- serum_mtb[,colnames(serum_mtb) %in% serum_cols]
+
+#add pseudocount to all intake variables
+pseudo_intake <- metabolites_intake + 1
+colnames(pseudo_intake) <- make.unique(colnames(pseudo_intake), sep = "_") #make sure that column names are all unique
+
+#add pseudocount to all fecal variables
+pseudo_fecal <- metabolites_fecal + 1
+colnames(pseudo_fecal) <- make.unique(colnames(pseudo_fecal), sep = "_") #make sure that column names are all unique
+
+#add pseudocount to all serum variables
+pseudo_serum <- metabolites_serum + 1
+colnames(pseudo_serum) <- make.unique(colnames(pseudo_serum), sep = "_") #make sure that column names are all unique
+
+# Apply the remove_outliers function to set outliers as NA within each column
+pseudo_intake <- remove_outliers(pseudo_intake)
+pseudo_fecal <- remove_outliers(pseudo_fecal)
+pseudo_serum <- remove_outliers(pseudo_serum)
+
+# Add participant ID's to both dataframes
+intake_part <- cbind(intake_mtb$UMCGIBDResearchIDorLLDeepID, pseudo_intake)
+names(intake_part)[1] <- 'UMCGIBDResearchIDorLLDeepID'
+fecal_part <- cbind(fecal_mtb$UMCGIBDResearchIDorLLDeepID, pseudo_fecal)
+names(fecal_part)[1] <- 'UMCGIBDResearchIDorLLDeepID'
+serum_part <- cbind(serum_mtb$UMCGIBDResearchIDorLLDeepID, pseudo_serum)
+names(serum_part)[1] <- 'UMCGIBDResearchIDorLLDeepID'
+
+# Get the common IDs
+common_ids <- intersect(intersect(intake_part$UMCGIBDResearchIDorLLDeepID, fecal_part$UMCGIBDResearchIDorLLDeepID), serum_part$UMCGIBDResearchIDorLLDeepID)
+
+# Filter data frames based on common IDs
+filtered_intake <- intake_part[intake_part$UMCGIBDResearchIDorLLDeepID %in% common_ids, ]
+filtered_fecal <- fecal_part[fecal_part$UMCGIBDResearchIDorLLDeepID %in% common_ids, ]
+filtered_serum <- serum_part[serum_part$UMCGIBDResearchIDorLLDeepID %in% common_ids, ]
+
+##==================================================== CORRELATION MATRIX: INTAKE VS FECAL METABOLITES ======================================================
+
+#merge intake + fecal metabolites
+intfecser <- merge(merge(filtered_intake, filtered_fecal, by = "UMCGIBDResearchIDorLLDeepID", all = TRUE), filtered_serum, by = "UMCGIBDResearchIDorLLDeepID", all = TRUE)
+
+#select columns with intake/fecal metabolite data
+int_cols <- grep("^int_", names(intfecser), value = TRUE)
+metabolites_intake <- filtered_intake[,colnames(filtered_intake) %in% int_cols]
+metabolites_intake <- metabolites_intake[, colSums(!is.na(metabolites_intake)) > 50]
+
+fec_cols <- grep("^fec_", names(intfecser), value = TRUE)
+metabolites_fecal <- filtered_fecal[,colnames(filtered_fecal) %in% fec_cols]
+metabolites_fecal <- metabolites_fecal[, colSums(!is.na(metabolites_fecal)) > 50]
+
+intfec_cols <- cbind(metabolites_intake, metabolites_fecal)
+
+#create correlation matrix
+cor = rcorr(as.matrix(intfec_cols), type='spearman')
+cor$P.adj <- p.adjust(cor$P, method = c('fdr')) # adjust P-values for multiple comparison
+cormatrix <- cor$r
+
+# Subset matrix to only show correlations between intake and fecal metabolites
+subset_rows <- grepl("^fec_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subsetted_matrix <- cormatrix[subset_rows, subset_columns]
+
+#set threshold for spearman rho value
+threshold <- 0.5
+# convert matrix to long format and filter based on set threshold
+plot.data <- melt(subsetted_matrix) 
+plot.data <- plot.data[abs(plot.data$value) > threshold,]
+
+# Sort plot.data based on the absolute values of the correlations
+sorted_correlations <- plot.data[order(abs(plot.data$value), decreasing = TRUE), ]
+
+# Select the top 6 correlations
+top_6 <- sorted_correlations[1:6, ]
