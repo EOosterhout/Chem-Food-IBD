@@ -65,7 +65,8 @@ remove_outliers <- function(data, multiplier = 1.5) {
 
 ##=========================================== LOAD DATA, CLEANING NAMES AND SUBSETTING ===============================
 
-data_full <- read_xlsx('analysis_table.xlsx')
+data_full <- as.data.frame(read_xlsx('analysis_table.xlsx'))
+rownames(data_full) <- data_full$UMCGIBDResearchIDorLLDeepID
 
 # Subset full dataset on plausible intake (sex dependent Willet)
 intake_male <- subset(data_full, data_full$sex == 'male')
@@ -78,13 +79,25 @@ plausible_intake_female<- intake_female %>% filter(between(SUMOFKCAL, 500, 3500)
 plausible_intake <- rbind(plausible_intake_male, plausible_intake_female)
 
 # Get metabolite data from analysis table using participant list from raw metabolite files
-intake <- read_xlsx('chem_raw_participant_V2.xlsx')
-fecal <- read_xlsx('fecal_mtb.xlsx')
-serum <- read_xlsx("blood_mtb_measured.xlsx")
+intake <- as.data.frame(read_xlsx('chem_raw_participant_V2.xlsx'))
+fecal <- as.data.frame(read_xlsx('fecal_mtb_full.xlsx'))
+serum <- as.data.frame(read_xlsx("blood_mtb.xlsx"))
 
+#participant ID's as rownames, for matching correlations
+rownames(intake) <- intake$UMCGIBDResearchIDorLLDeepID
+rownames(fecal) <- fecal$UMCGIBDResearchIDorLLDeepID
+rownames(serum) <- serum$UMCGIBDResearchIDorLLDeepID
+
+#select participant IDs from raw data files
 participants_intake <- as.character(intake$UMCGIBDResearchIDorLLDeepID)
 participants_fecal <- as.character(fecal$UMCGIBDResearchIDorLLDeepID)
 participants_serum <- as.character(serum$UMCGIBDResearchIDorLLDeepID)
+
+#filter full analysis table on metabolite type
+intake_mtb <- data_full[data_full$UMCGIBDResearchIDorLLDeepID %in% participants_intake,]
+fecal_mtb <- data_full[data_full$UMCGIBDResearchIDorLLDeepID %in% participants_fecal,]
+serum_mtb <- data_full[data_full$UMCGIBDResearchIDorLLDeepID %in% participants_serum,]
+
 
 intake_mtb <- plausible_intake[plausible_intake$UMCGIBDResearchIDorLLDeepID %in% participants_intake,]
 fecal_mtb <- plausible_intake[plausible_intake$UMCGIBDResearchIDorLLDeepID %in% participants_fecal,]
@@ -524,9 +537,10 @@ filter_20pct <- metabolites_intake[,non_zero_pct >= 0.2]
 #add pseudocount to all variables
 pseudo <- filter_20pct + 1
 colnames(pseudo) <- make.unique(colnames(pseudo), sep = "_") #make sure that column names are all unique
-
+sum(is.na(pseudo)) #0 NA
 # Apply the remove_outliers function to set outliers as NA within each column
 pseudo_clean <- remove_outliers(pseudo)
+sum(is.na(pseudo_clean)) #87246 NA
 
 #LOG transformation or RANK transformation
 pseudo_log <- log2(pseudo_clean)
@@ -901,28 +915,16 @@ intake_mtb_flare <- pseudo_flare[,colnames(pseudo_flare) %in% flare]
 
 ##=========================== METABOLITES PRESENT FOR INTAKE, FECAL, SERUM ========================
 
-# Columns containing intake metabolites
-intake_cols <- grep("^int_", names(intake_mtb), value = TRUE)
-metabolites_intake <- intake_mtb[,colnames(intake_mtb) %in% intake_cols]
-
-# Columns containing fecal metabolites
-fecal_cols <- grep("^fec_", names(fecal_mtb), value = TRUE)
-metabolites_fecal <- fecal_mtb[,colnames(fecal_mtb) %in% fecal_cols]
-
-# Columns containing fecal metabolites
-serum_cols <- grep("^ser_", names(serum_mtb), value = TRUE)
-metabolites_serum <- serum_mtb[,colnames(serum_mtb) %in% serum_cols]
-
 #add pseudocount to all intake variables
-pseudo_intake <- metabolites_intake + 1
+pseudo_intake <- intake[,7:1114] + 1
 colnames(pseudo_intake) <- make.unique(colnames(pseudo_intake), sep = "_") #make sure that column names are all unique
 
 #add pseudocount to all fecal variables
-pseudo_fecal <- metabolites_fecal + 1
+pseudo_fecal <- fecal[,2:1685] + 1
 colnames(pseudo_fecal) <- make.unique(colnames(pseudo_fecal), sep = "_") #make sure that column names are all unique
 
 #add pseudocount to all serum variables
-pseudo_serum <- metabolites_serum + 1
+pseudo_serum <- serum[,2:1184] + 1
 colnames(pseudo_serum) <- make.unique(colnames(pseudo_serum), sep = "_") #make sure that column names are all unique
 
 # Apply the remove_outliers function to set outliers as NA within each column
@@ -930,40 +932,43 @@ pseudo_intake <- remove_outliers(pseudo_intake)
 pseudo_fecal <- remove_outliers(pseudo_fecal)
 pseudo_serum <- remove_outliers(pseudo_serum)
 
-# Add participant ID's to both dataframes
-intake_part <- cbind(intake_mtb$UMCGIBDResearchIDorLLDeepID, pseudo_intake)
-names(intake_part)[1] <- 'UMCGIBDResearchIDorLLDeepID'
-fecal_part <- cbind(fecal_mtb$UMCGIBDResearchIDorLLDeepID, pseudo_fecal)
-names(fecal_part)[1] <- 'UMCGIBDResearchIDorLLDeepID'
-serum_part <- cbind(serum_mtb$UMCGIBDResearchIDorLLDeepID, pseudo_serum)
-names(serum_part)[1] <- 'UMCGIBDResearchIDorLLDeepID'
-
 # Get the common IDs
-common_ids <- intersect(intersect(intake_part$UMCGIBDResearchIDorLLDeepID, fecal_part$UMCGIBDResearchIDorLLDeepID), serum_part$UMCGIBDResearchIDorLLDeepID)
+common_ids <- row.names(pseudo_serum)[(row.names(pseudo_serum)) %in% (row.names(pseudo_fecal))]
+
+# Apply the remove_outliers function to set outliers as NA within each column
+pseudo_intake <- remove_outliers(pseudo_intake)
+pseudo_fecal <- remove_outliers(pseudo_fecal)
+pseudo_serum <- remove_outliers(pseudo_serum)
 
 # Filter data frames based on common IDs
-filtered_intake <- intake_part[intake_part$UMCGIBDResearchIDorLLDeepID %in% common_ids, ]
-filtered_fecal <- fecal_part[fecal_part$UMCGIBDResearchIDorLLDeepID %in% common_ids, ]
-filtered_serum <- serum_part[serum_part$UMCGIBDResearchIDorLLDeepID %in% common_ids, ]
+filtered_intake <- pseudo_intake[row.names(pseudo_intake) %in% common_ids, ]
+filtered_fecal <- pseudo_fecal[row.names(pseudo_fecal) %in% common_ids, ]
+filtered_serum <- pseudo_serum[row.names(pseudo_serum) %in% common_ids, ]
+
+#select intake, fecal and serum metabolites columns
+intake.cols <- as.character(colnames(filtered_intake[,1:1108]))
+fecal.cols <- as.character(colnames(filtered_fecal[,1:1684]))
+blood.cols <- as.character(colnames(filtered_serum[,1:1183]))
+
+# Modify column names using paste0()
+intake <- paste0("int_", intake.cols)
+fecal <- paste0("fec_", fecal.cols)
+blood <- paste0("ser_", blood.cols)
+
+# Rename selected columns in the data frame
+names(filtered_intake)[names(filtered_intake) %in% intake.cols] <- intake
+names(filtered_fecal)[names(filtered_fecal) %in% fecal.cols] <- fecal
+names(filtered_serum)[names(filtered_serum) %in% blood.cols] <- blood
 
 ##==================================================== CORRELATION MATRIX: INTAKE VS FECAL METABOLITES ======================================================
 
 #merge intake + fecal metabolites
-intfecser <- merge(merge(filtered_intake, filtered_fecal, by = "UMCGIBDResearchIDorLLDeepID", all = TRUE), filtered_serum, by = "UMCGIBDResearchIDorLLDeepID", all = TRUE)
-
-#select columns with intake/fecal metabolite data
-int_cols <- grep("^int_", names(intfecser), value = TRUE)
-metabolites_intake <- filtered_intake[,colnames(filtered_intake) %in% int_cols]
-metabolites_intake <- metabolites_intake[, colSums(!is.na(metabolites_intake)) > 50]
-
-fec_cols <- grep("^fec_", names(intfecser), value = TRUE)
-metabolites_fecal <- filtered_fecal[,colnames(filtered_fecal) %in% fec_cols]
-metabolites_fecal <- metabolites_fecal[, colSums(!is.na(metabolites_fecal)) > 50]
-
-intfec_cols <- cbind(metabolites_intake, metabolites_fecal)
+intfec <- merge(filtered_intake, filtered_fecal, by = "row.names", all.x = TRUE)
+rownames(intfec) <- intfec$Row.names
+intfec$Row.names <- NULL
 
 #create correlation matrix
-cor = rcorr(as.matrix(intfec_cols), type='spearman')
+cor = rcorr(as.matrix(intfec), type='spearman')
 cor$P.adj <- p.adjust(cor$P, method = c('fdr')) # adjust P-values for multiple comparison
 cormatrix <- cor$r
 
@@ -982,4 +987,5 @@ plot.data <- plot.data[abs(plot.data$value) > threshold,]
 sorted_correlations <- plot.data[order(abs(plot.data$value), decreasing = TRUE), ]
 
 # Select the top 6 correlations
-top_6 <- sorted_correlations[1:6, ]
+top_6 <- sorted_correlations[1:100, ]
+
