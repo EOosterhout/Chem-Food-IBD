@@ -23,6 +23,8 @@ library(ggsignif)
 library(ggrepel)
 library(RColorBrewer)
 library(gridExtra)
+library(jtools)
+library(VennDiagram)
 
 #packages for linear regression/statistical testing
 library(stats)
@@ -66,17 +68,31 @@ remove_outliers <- function(data, multiplier = 1.5) {
 ##=========================================== LOAD DATA, CLEANING NAMES AND SUBSETTING ===============================
 
 data_full <- as.data.frame(read_xlsx('analysis_table.xlsx'))
-rownames(data_full) <- data_full$UMCGIBDResearchIDorLLDeepID
+row.names(data_full) <- data_full$UMCGIBDResearchIDorLLDeepID
 
 # Subset full dataset on plausible intake (sex dependent Willet)
+
+#Males
 intake_male <- subset(data_full, data_full$sex == 'male')
-plausible_intake_male<- intake_male %>% filter(between(SUMOFKCAL, 800, 4000)) # filter on plausible intake (800 < intake < 4000)
+intake_male_high <- subset(intake_male, intake_male["SUMOFKCAL"] > 4000)
 
-intake_female<- subset(data_full, data_full$sex == 'female')
-plausible_intake_female<- intake_female %>% filter(between(SUMOFKCAL, 500, 3500)) # filter on plausible intake (500 < intake < 3500)
+intake_male <- subset(data_full, data_full$sex == 'male')
+intake_male_low <- subset(intake_male, intake_male["SUMOFKCAL"] < 800)
 
-#bind plausible intake (1641/1983)
-plausible_intake <- rbind(plausible_intake_male, plausible_intake_female)
+#Females
+intake_female <- subset(data_full, data_full$sex == 'female')
+intake_female_high <- subset(intake_female, intake_female["SUMOFKCAL"] > 3500)
+
+intake_female <- subset(data_full, data_full$sex == 'female')
+intake_female_low <- subset(intake_female, intake_female["SUMOFKCAL"] < 500)
+
+#Merge participants with implausible intake (25 participants)
+implausible_intake_male <- rbind(intake_male_high, intake_male_low)
+implausible_intake_female <- rbind(intake_female_high, intake_female_low)
+implausible_intake <- rbind(implausible_intake_male, implausible_intake_female)
+
+# Remove participants from original dataframe based on presence in imlausible intake
+plausible_intake <- data_full[!(rownames(data_full) %in% rownames(implausible_intake)), ]
 
 # Get metabolite data from analysis table using participant list from raw metabolite files
 intake <- as.data.frame(read_xlsx('chem_raw_participant_V2.xlsx'))
@@ -94,28 +110,37 @@ participants_fecal <- as.character(fecal$UMCGIBDResearchIDorLLDeepID)
 participants_serum <- as.character(serum$UMCGIBDResearchIDorLLDeepID)
 
 #filter full analysis table on metabolite type
-intake_mtb <- data_full[data_full$UMCGIBDResearchIDorLLDeepID %in% participants_intake,]
-fecal_mtb <- data_full[data_full$UMCGIBDResearchIDorLLDeepID %in% participants_fecal,]
-serum_mtb <- data_full[data_full$UMCGIBDResearchIDorLLDeepID %in% participants_serum,]
-
-
 intake_mtb <- plausible_intake[plausible_intake$UMCGIBDResearchIDorLLDeepID %in% participants_intake,]
 fecal_mtb <- plausible_intake[plausible_intake$UMCGIBDResearchIDorLLDeepID %in% participants_fecal,]
 serum_mtb <- plausible_intake[plausible_intake$UMCGIBDResearchIDorLLDeepID %in% participants_serum,]
 
-#clean compound names, intake metabolites
-names(intake_mtb) = gsub(pattern = ":", replacement = "_", x = names(intake_mtb))
-names(intake_mtb) = gsub(pattern = " ", replacement = "_", x = names(intake_mtb))
-names(intake_mtb) = gsub(pattern = "-", replacement = "_", x = names(intake_mtb))
-names(intake_mtb) = gsub(pattern = ",", replacement = "", x = names(intake_mtb))
-names(intake_mtb) = gsub(pattern = '"', replacement = "", x = names(intake_mtb))
-names(intake_mtb) = gsub(pattern = "\\|.*", replacement = "", x = names(intake_mtb))
-names(intake_mtb) = gsub(pattern = "\\(", replacement = "", x = names(intake_mtb))
-names(intake_mtb) = gsub(pattern = "\\)", replacement = "", x = names(intake_mtb))
-names(intake_mtb) = gsub(pattern = "\\+", replacement = "pos", x = names(intake_mtb))
-names(intake_mtb) = gsub(pattern = "\\'", replacement = "", x = names(intake_mtb))
-names(intake_mtb) = gsub(pattern = "\\â±", replacement = "", x = names(intake_mtb))
+##========================================== CLEAN INTAKE METABOLITE NAMES TO WORK IN REGRESSION MODEL ===========================================##
 
+intake <- intake[!(rownames(intake) %in% rownames(implausible_intake)), ]
+
+#clean compound names, intake metabolites
+names(intake) = gsub(pattern = ":", replacement = "_", x = names(intake))
+names(intake) = gsub(pattern = " ", replacement = "_", x = names(intake))
+names(intake) = gsub(pattern = "-", replacement = "_", x = names(intake))
+names(intake) = gsub(pattern = ",", replacement = "", x = names(intake))
+names(intake) = gsub(pattern = '"', replacement = "", x = names(intake))
+names(intake) = gsub(pattern = "\\|.*", replacement = "", x = names(intake))
+names(intake) = gsub(pattern = "\\(", replacement = "", x = names(intake))
+names(intake) = gsub(pattern = "\\)", replacement = "", x = names(intake))
+names(intake) = gsub(pattern = "\\+", replacement = "pos", x = names(intake))
+names(intake) = gsub(pattern = "\\'", replacement = "", x = names(intake))
+names(intake) = gsub(pattern = "\\â±", replacement = "", x = names(intake))
+
+# Get current column names
+old_colnames <- colnames(intake)
+
+# Replace numeric column names with letters
+new_colnames <- make.names(old_colnames, unique = TRUE)
+
+# Assign new column names to the data frame
+colnames(intake) <- new_colnames
+
+row.names(intake) <- intake$UMCGIBDResearchIDorLLDeepID
 
 ##===================================== DIFFERENTIAL ABUNDANCE ANALYSIS: INTAKE_IBDvsNon-IBD (LOG TRANSFORMED AND FILTERED DATA) ====================================================
 
@@ -134,8 +159,6 @@ pseudo <- filter_20pct + 1
 # Create a new column specifying IBD (yes/no) for each sample
 pseudo_diagnosis <- cbind(intake_mtb$diagnosis, pseudo)
 names(pseudo_diagnosis)[1] <- 'diagnosis'
-
-#pseudo_clean <- remove_outliers(pseudo_diagnosis, 'diagnosis')
 
 ##======================= WILCOXON TEST ======================##
 wilcoxon_p <- c() # Initialize empty vector for p-values
@@ -167,7 +190,6 @@ wilcoxon_plot <- ggplot(df) +
   labs(x = "p-value", y = "Frequency") 
 
 wilcoxon_plot
-
 
 ##============================== VOLCANO PLOT OF DIFFERENTIAL ABUNDANCE ANALYSIS ===============================##
 
@@ -312,7 +334,7 @@ gridExtra::grid.arrange(
   nrow = 2
 )
 
-##===================================== DIFFERENTIAL ABUNDANCE ANALYSIS: INTAKE_CALPROTECTIN >150 vs <150 (LOG TRANSFORMED AND FILTERED DATA) ====================================================
+##===================================== DIFFERENTIAL ABUNDANCE ANALYSIS: INTAKE_flare >150 vs <150 (LOG TRANSFORMED AND FILTERED DATA) ====================================================
 
 # Columns containing intake metabolites
 intake_cols <- grep("^int_", names(intake_mtb), value = TRUE)
@@ -326,9 +348,9 @@ filter_20pct <- metabolites_intake[,non_zero_pct >= 0.2]
 #add pseudocount to all variables
 pseudo <- filter_20pct + 1
 
-# Create a new column specifying calprotectin >150 (yes/no) for each sample
-pseudo_calprotectin <- cbind(intake_mtb$calprotectin_above150, pseudo)
-names(pseudo_calprotectin)[1] <- 'calprotectin_above150'
+# Create a new column specifying flare >150 (yes/no) for each sample
+pseudo_flare <- cbind(intake_mtb$flare_above150, pseudo)
+names(pseudo_flare)[1] <- 'flare_above150'
 
 #pseudo_clean <- remove_outliers(pseudo_diagnosis, 'diagnosis')
 
@@ -337,8 +359,8 @@ wilcoxon_p <- c() # Initialize empty vector for p-values
 # Do "for loop" over selected column names
 for (i in 2:1010) {
   
-  result <- wilcox.test(pseudo_calprotectin[, i] ~ calprotectin_above150,
-                        data = pseudo_calprotectin)
+  result <- wilcox.test(pseudo_flare[, i] ~ flare_above150,
+                        data = pseudo_flare)
   
   # Stores p-value to the vector with this column name
   wilcoxon_p[[i]]  <- result$p.value
@@ -346,7 +368,7 @@ for (i in 2:1010) {
 }
 
 #store metabolites with raw p-value in new dataframe
-wilcoxon_p <- data.frame(metabolites =  names(pseudo_calprotectin[,2:1010]),
+wilcoxon_p <- data.frame(metabolites =  names(pseudo_flare[,2:1010]),
                          p_raw = unlist(wilcoxon_p))
 wilcoxon_p$p_adjusted <- p.adjust(wilcoxon_p$p_raw, method = "fdr") #add column with p_adj for multiple testing
 
@@ -367,20 +389,20 @@ wilcoxon_plot
 ##============================== VOLCANO PLOT OF DIFFERENTIAL ABUNDANCE ANALYSIS ===============================##
 
 #log2 transformation
-intake_log <- log2(pseudo_calprotectin[,2:1010])
-intake_log <- cbind(calprotectin_above150 = pseudo_calprotectin$calprotectin_above150, intake_log)
+intake_log <- log2(pseudo_flare[,2:1010])
+intake_log <- cbind(flare_above150 = pseudo_flare$flare_above150, intake_log)
 
 
 #calculate the mean of each metabolite in >150 group
-high_calprotectin <- filter(intake_log, intake_log$calprotectin_above150 == 'yes')
-high_calprotectin_m = apply(high_calprotectin[,2:1010], 2, mean)
+high_flare <- filter(intake_log, intake_log$flare_above150 == 'yes')
+high_flare_m = apply(high_flare[,2:1010], 2, mean)
 
 #calcuate the mean of each metabolite in <150 group
-low_calprotectin <- filter(intake_log, intake_log$calprotectin_above150 == 'no')
-low_calprotectin_m = apply(low_calprotectin[,2:1010], 2, mean)
+low_flare <- filter(intake_log, intake_log$flare_above150 == 'no')
+low_flare_m = apply(low_flare[,2:1010], 2, mean)
 
 #because the data is already log2 transformed, take the difference between the means.
-foldchange <- low_calprotectin_m - high_calprotectin_m
+foldchange <- low_flare_m - high_flare_m
 hist(foldchange, xlab = "log2 Fold Change (<150 vs >150)")
 
 #add foldchange to df containing p-values
@@ -418,15 +440,15 @@ highest6 <- wilcoxon_p[wilcoxon_p$foldchange %in% sort(wilcoxon_p$foldchange, de
 # From intake table, takes only those metabolites that had highest foldchange
 highest6_chem <- intake_log[,colnames(intake_log) %in% highest6]
 # Adds colData that includes patient status information
-highest6_full <- cbind(pseudo_calprotectin$calprotectin_above150, highest6_chem)
-names(highest6_full)[1] <- 'calprotectin_above150'
+highest6_full <- cbind(pseudo_flare$flare_above150, highest6_chem)
+names(highest6_full)[1] <- 'flare_above150'
 highest6_full <- na.omit(highest6_full)
 
 # Puts plots in the same picture
 gridExtra::grid.arrange(
   
   # Plot 1
-  ggplot(highest6_full, aes(x = calprotectin_above150, y = highest6_full[,2], fill = calprotectin_above150)) + 
+  ggplot(highest6_full, aes(x = flare_above150, y = highest6_full[,2], fill = flare_above150)) + 
     geom_boxplot() + 
     geom_signif(comparisons = list(c("yes", "no")), 
                 map_signif_level=TRUE) +
@@ -439,7 +461,7 @@ gridExtra::grid.arrange(
           axis.title.x=element_blank()), # makes titles smaller, removes x axis title
   
   # Plot 2
-  ggplot(highest6_full, aes(x = calprotectin_above150, y = highest6_full[,3], fill = calprotectin_above150)) + 
+  ggplot(highest6_full, aes(x = flare_above150, y = highest6_full[,3], fill = flare_above150)) + 
     geom_boxplot() + 
     geom_signif(comparisons = list(c("yes", "no")), 
                 map_signif_level=TRUE) +
@@ -452,7 +474,7 @@ gridExtra::grid.arrange(
           axis.title.x=element_blank()), # makes titles smaller, removes x axis title
   
   # Plot 3
-  ggplot(highest6_full, aes(x = calprotectin_above150, y = highest6_full[,4], fill = calprotectin_above150)) + 
+  ggplot(highest6_full, aes(x = flare_above150, y = highest6_full[,4], fill = flare_above150)) + 
     geom_boxplot() + 
     geom_signif(comparisons = list(c("yes", "no")), 
                 map_signif_level=TRUE) +
@@ -465,7 +487,7 @@ gridExtra::grid.arrange(
           axis.title.x=element_blank()), # makes titles smaller, removes x axis title
   
   # Plot 4
-  ggplot(highest6_full, aes(x = calprotectin_above150, y = highest6_full[,5], fill = calprotectin_above150)) + 
+  ggplot(highest6_full, aes(x = flare_above150, y = highest6_full[,5], fill = flare_above150)) + 
     geom_boxplot() + 
     geom_signif(comparisons = list(c("yes", "no")), 
                 map_signif_level=TRUE) +
@@ -478,7 +500,7 @@ gridExtra::grid.arrange(
           axis.title.x=element_blank()), # makes titles smaller, removes x axis title
   
   # Plot 5
-  ggplot(highest6_full, aes(x = calprotectin_above150, y = highest6_full[,6], fill = calprotectin_above150)) + 
+  ggplot(highest6_full, aes(x = flare_above150, y = highest6_full[,6], fill = flare_above150)) + 
     geom_boxplot() + 
     geom_signif(comparisons = list(c("yes", "no")), 
                 map_signif_level=TRUE) +
@@ -491,7 +513,7 @@ gridExtra::grid.arrange(
           axis.title.x=element_blank()), # makes titles smaller, removes x axis title
   
   # Plot 6
-  ggplot(highest6_full, aes(x = calprotectin_above150, y = highest6_full[,7], fill = calprotectin_above150)) + 
+  ggplot(highest6_full, aes(x = flare_above150, y = highest6_full[,7], fill = flare_above150)) + 
     geom_boxplot() + 
     geom_signif(comparisons = list(c("yes", "no")), 
                 map_signif_level=TRUE) +
@@ -508,26 +530,25 @@ gridExtra::grid.arrange(
   nrow = 2
 )
 
-##================================================ INTAKE METABOLITES BASED ON INTAKEDIFFERENCE FOUND IN DIAGNOSIS AND CALPROTECTIN ====================================================##
+##================================================ INTAKE METABOLITES BASED ON INTAKEDIFFERENCE FOUND IN DIAGNOSIS AND flare ====================================================##
 
-#Metabolite names based on intakedifference == YES (only works when NOT running calprotectin part of script)
+#Metabolite names based on intakedifference == YES (only works when NOT running flare part of script)
 intakedifference_diagnosis <- as.character(wilcoxon_p$metabolites[wilcoxon_p$intakedifference != "NO"])
 
 #Metabolite names based on intakedifference == YES
-intakedifference_calprotectin <- as.character(wilcoxon_p$metabolites[wilcoxon_p$intakedifference != "NO"])
+intakedifference_flare <- as.character(wilcoxon_p$metabolites[wilcoxon_p$intakedifference != "NO"])
 
 #New df containing only intake metabolites that show difference in intake in 
       ## IBD vs Non-IBD
-      ## calprotectin <150 vs calprotectin >150
+      ## flare <150 vs flare >150
 intake_mtb_1 <- intake_mtb[,colnames(intake_mtb) %in% intakedifference_diagnosis]
-intake_mtb_2 <- intake_mtb_1[,colnames(intake_mtb_1) %in% intakedifference_calprotectin]
-
+intake_mtb_2 <- intake_mtb_1[,colnames(intake_mtb_1) %in% intakedifference_flare]
 
 ##========================================== LINEAR REGRESSION: IBD vs NON-IBD ========================================
 
-# Columns containing intake metabolites
-intake_cols <- grep("^int_", names(intake_mtb), value = TRUE)
-metabolites_intake <- intake_mtb[,colnames(intake_mtb) %in% intake_cols]
+# Only columns containing metabolite data from original intake df
+metabolites_intake <- intake[,7:1114]
+colnames(metabolites_intake) <- make.unique(colnames(metabolites_intake), sep = "_") #make sure that column names are all unique
 
 # Calculate the percentage of non-zero values for each variable
 non_zero_pct <- apply(metabolites_intake != 0, 2, mean)
@@ -536,15 +557,16 @@ filter_20pct <- metabolites_intake[,non_zero_pct >= 0.2]
 
 #add pseudocount to all variables
 pseudo <- filter_20pct + 1
-colnames(pseudo) <- make.unique(colnames(pseudo), sep = "_") #make sure that column names are all unique
 sum(is.na(pseudo)) #0 NA
 # Apply the remove_outliers function to set outliers as NA within each column
 pseudo_clean <- remove_outliers(pseudo)
-sum(is.na(pseudo_clean)) #87246 NA
+sum(is.na(pseudo_clean)) #109332 NA
 
 #LOG transformation or RANK transformation
 pseudo_log <- log2(pseudo_clean)
 pseudo_rank <- pseudo_clean %>% mutate_all(~ (length(.) + 1) - rank(.))
+
+## Filtering of analysis table on metabolite type is performed in == LOAD DATA, CLEANING NAMES AND SUBSETTING == #
 
 # Create a new column specifying IBD (yes/no) for each sample
 pseudo_diagnosis <- cbind(diagnosis = intake_mtb$diagnosis, pseudo_clean)
@@ -552,8 +574,8 @@ pseudo_diagnosis <- cbind(diagnosis = intake_mtb$diagnosis, pseudo_log)
 pseudo_diagnosis <- cbind(diagnosis = intake_mtb$diagnosis, pseudo_rank)
 
 # Add covariates to df
-pseudo_diagnosis <- cbind(age = intake_mtb$age, pseudo_diagnosis)
-pseudo_diagnosis <- cbind(sex = intake_mtb$sex, pseudo_diagnosis)
+pseudo_diagnosis <- cbind(age = intake_mtb$sex, pseudo_diagnosis)
+pseudo_diagnosis <- cbind(sex = intake_mtb$age, pseudo_diagnosis)
 pseudo_diagnosis <- cbind(BMI = intake_mtb$BMI, pseudo_diagnosis)
 
 #============LINEAR REGRESSION ==============#
@@ -606,6 +628,37 @@ for (dep_var in metabolite_names) {
 linreg_diagnosis <- results_df[results_df$Coefficient == 'diagnosisIBD',]
 linreg_diagnosis$p_adjusted <- p.adjust(linreg_diagnosis$PValue, method = "fdr") #add column with p_adj for multiple testing
 
+##============================= SIGNIFICANT COEFFICIENTS ==========================##
+
+#Lactic acid
+model_1 <- lm(lactic_acid ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
+summary(model_1)
+plot_summs(model_1)
+
+#Pentanoic acid
+model_2 <- lm(pentanoic_acid ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
+summary(model_2)
+plot_summs(model_2)
+
+#Niacin
+model_3 <- lm(niacin_total ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
+summary(model_3)
+plot_summs(model_3)
+
+#Oxalic acid
+model_4 <- lm(oxalic_acid ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
+summary(model_4)
+plot_summs(model_4)
+
+#Caffeic acid
+model_5 <- lm(caffeic_acid.1 ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
+summary(model_5)
+plot_summs(model_5)
+
+#Selenium
+model_6 <- lm(selenium_se ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
+summary(model_6)
+plot_summs(model_6)
 ##============================== VOLCANO PLOT OF LINREG_DIAGNOSIS ===============================##
 
 ggplot(linreg_diagnosis, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Metabolite)) + 
@@ -620,7 +673,7 @@ ggplot(linreg_diagnosis, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Metabo
 
 # Sorts pvalue in increasing order. Takes 6 first ones. Takes those rows that match
 # with foldchange. Takes metabolites. 
-highest6 <- linreg_diagnosis[linreg_diagnosis$PValue %in% sort(linreg_diagnosis$PValue, decreasing = FALSE)[1:6], ]$Intake_Metabolite
+highest6 <- linreg_diagnosis[linreg_diagnosis$RSquared %in% sort(linreg_diagnosis$RSquared, decreasing = T)[1:6], ]$Intake_Metabolite
 # From intake table, takes only those metabolites that had highest foldchange
 highest6_chem <- pseudo_diagnosis[,colnames(pseudo_diagnosis) %in% highest6]
 # Adds colData that includes patient status information
@@ -717,24 +770,29 @@ gridExtra::grid.arrange(
 
 ##========================================== LINEAR REGRESSION: >150 CALPROTECTIN vs <150 CALPROTECTIN ========================================
 
-# Columns containing intake metabolites
-intake_cols <- grep("^int_", names(intake_mtb), value = TRUE)
-metabolites_intake <- intake_mtb[,colnames(intake_mtb) %in% intake_cols]
+# Only columns containing metabolite data from original intake df
+metabolites_intake <- intake[,7:1114]
+colnames(metabolites_intake) <- make.unique(colnames(metabolites_intake), sep = "_") #make sure that column names are all unique
 
 # Calculate the percentage of non-zero values for each variable
 non_zero_pct <- apply(metabolites_intake != 0, 2, mean)
 # Filter variables with at least a non-zero value in 20% of the data
 filter_20pct <- metabolites_intake[,non_zero_pct >= 0.2]
 
-#add pseudocount to all variables + LOG Transformation
+#add pseudocount to all variables
 pseudo <- filter_20pct + 1
-colnames(pseudo) <- make.unique(colnames(pseudo), sep = "_") #make sure that column names are all unique
+sum(is.na(pseudo)) #0 NA
+# Apply the remove_outliers function to set outliers as NA within each column
+pseudo_clean <- remove_outliers(pseudo)
+sum(is.na(pseudo_clean)) #109332 NA
 
 #LOG transformation or RANK transformation
-pseudo_log <- log2(pseudo)
-pseudo_rank <- pseudo %>% mutate_all(~ (length(.) + 1) - rank(.))
+pseudo_log <- log2(pseudo_clean)
+pseudo_rank <- pseudo_clean %>% mutate_all(~ (length(.) + 1) - rank(.))
 
-# Create a new column specifying IBD (yes/no) for each sample
+## Filtering of analysis table on metabolite type is performed in == LOAD DATA, CLEANING NAMES AND SUBSETTING == #
+
+# Create a new column specifying high calprotectin (yes/no) for each sample
 pseudo_calprotectin <- cbind(calprotectin_above150 = intake_mtb$calprotectin_above150, pseudo)
 pseudo_calprotectin <- cbind(calprotectin_above150 = intake_mtb$calprotectin_above150, pseudo_log)
 pseudo_calprotectin <- cbind(calprotectin_above150 = intake_mtb$calprotectin_above150, pseudo_rank)
@@ -794,7 +852,14 @@ for (dep_var in metabolite_names) {
 linreg_calprotectin <- results_df[results_df$Coefficient == 'calprotectin_above150yes',]
 linreg_calprotectin$p_adjusted <- p.adjust(linreg_calprotectin$PValue, method = "fdr") #add column with p_adj for multiple testing
 
-##============================== VOLCANO PLOT OF LINREG_CALPROTECTIN ===============================##
+##============================= SIGNIFICANT COEFFICIENTS ==========================##
+
+#Cryptoxanthin beta
+model_1 <- lm(cryptoxanthin_beta ~ age + sex + BMI + calprotectin_above150, data = pseudo_calprotectin)
+summary(model_1)
+plot_summs(model_1)
+
+##============================== VOLCANO PLOT OF LINREG_calprotectin ===============================##
 
 ggplot(linreg_calprotectin, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Metabolite)) + 
   geom_point() + 
@@ -804,11 +869,109 @@ ggplot(linreg_calprotectin, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Met
   geom_text_repel(size = 2) +
   scale_x_continuous(name = 'R Squared (calprotectin)')
 
+##================================================= SIGNIFICANT INTAKE DIFFERENCE (flare) ==============================================##
+
+# Sorts pvalue in increasing order. Takes 6 first ones. Takes those rows that match
+# with foldchange. Takes metabolites. 
+highest6 <- linreg_flare[linreg_flare$PValue %in% sort(linreg_flare$PValue, decreasing = F)[1:6], ]$Intake_Metabolite
+# From intake table, takes only those metabolites that had highest foldchange
+highest6_chem <- pseudo_flare[,colnames(pseudo_flare) %in% highest6]
+# Adds colData that includes patient status information
+highest6_full <- cbind(pseudo_flare$flare_above150, highest6_chem)
+names(highest6_full)[1] <- 'flare'
+highest6_full <- na.omit(highest6_full)
+
+# Puts plots in the same picture
+gridExtra::grid.arrange(
+  
+  # Plot 1
+  ggplot(highest6_full, aes(x = flare, y = highest6_full[,2], fill = flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[2]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 2
+  ggplot(highest6_full, aes(x = flare, y = highest6_full[,3], fill = flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[3]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 3
+  ggplot(highest6_full, aes(x = flare, y = highest6_full[,4], fill = flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[4]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 4
+  ggplot(highest6_full, aes(x = flare, y = highest6_full[,5], fill = flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[5]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 5
+  ggplot(highest6_full, aes(x = flare, y = highest6_full[,6], fill = flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[6]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 6
+  ggplot(highest6_full, aes(x = flare, y = highest6_full[,7], fill = flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[7]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # 3 columns and 2 rows
+  ncol = 3, 
+  nrow = 2
+)
+
 ##========================================== LINEAR REGRESSION: BEFORE A FLARE vs DURING/AFTER A FLARE ========================================
 
-# Columns containing intake metabolites
-intake_cols <- grep("^int_", names(intake_mtb), value = TRUE)
-metabolites_intake <- intake_mtb[,colnames(intake_mtb) %in% intake_cols]
+# Only columns containing metabolite data from original intake df
+metabolites_intake <- intake[,7:1114]
+colnames(metabolites_intake) <- make.unique(colnames(metabolites_intake), sep = "_") #make sure that column names are all unique
 
 # Calculate the percentage of non-zero values for each variable
 non_zero_pct <- apply(metabolites_intake != 0, 2, mean)
@@ -817,11 +980,16 @@ filter_20pct <- metabolites_intake[,non_zero_pct >= 0.2]
 
 #add pseudocount to all variables
 pseudo <- filter_20pct + 1
-colnames(pseudo) <- make.unique(colnames(pseudo), sep = "_") #make sure that column names are all unique
+sum(is.na(pseudo)) #0 NA
+# Apply the remove_outliers function to set outliers as NA within each column
+pseudo_clean <- remove_outliers(pseudo)
+sum(is.na(pseudo_clean)) #109332 NA
 
 #LOG transformation or RANK transformation
-pseudo_log <- log2(pseudo)
-pseudo_rank <- pseudo %>% mutate_all(~ (length(.) + 1) - rank(.))
+pseudo_log <- log2(pseudo_clean)
+pseudo_rank <- pseudo_clean %>% mutate_all(~ (length(.) + 1) - rank(.))
+
+## Filtering of analysis table on metabolite type is performed in == LOAD DATA, CLEANING NAMES AND SUBSETTING == #
 
 # Create a new column specifying IBD (yes/no) for each sample
 pseudo_flare <- cbind(before_a_flare = intake_mtb$before_a_flare, pseudo)
@@ -883,6 +1051,13 @@ for (dep_var in metabolite_names) {
 linreg_flare <- results_df[results_df$Coefficient == 'before_a_flareyes',]
 linreg_flare$p_adjusted <- p.adjust(linreg_flare$PValue, method = "fdr") #add column with p_adj for multiple testing
 
+##============================= SIGNIFICANT COEFFICIENTS ==========================##
+
+#Cryptoxanthin beta
+model_1 <- lm(daidzin ~ age + sex + BMI + calprotectin_above150, data = pseudo_calprotectin)
+summary(model_1)
+plot_summs(model_1)
+
 ##============================== VOLCANO PLOT OF LINREG_DIAGNOSIS ===============================##
 
 ggplot(linreg_flare, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Metabolite)) + 
@@ -893,25 +1068,151 @@ ggplot(linreg_flare, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Metabolite
   geom_text_repel(size = 2) +
   scale_x_continuous(name = 'R Squared (flare)')
 
-##================================================ ASSOCIATED DIET METABOLITES WITH CLINICAL OUTCOMES BASED ON LINEAR REGRESSION ====================================================##
+##================================================= SIGNIFICANT INTAKE DIFFERENCE (FLARE) ==============================================##
+
+# Sorts pvalue in increasing order. Takes 6 first ones. Takes those rows that match
+# with foldchange. Takes metabolites. 
+highest6 <- linreg_flare[linreg_flare$p_adjusted %in% sort(linreg_flare$p_adjusted, decreasing = F)[1:6], ]$Intake_Metabolite
+# From intake table, takes only those metabolites that had highest foldchange
+highest6_chem <- pseudo_flare[,colnames(pseudo_flare) %in% highest6]
+# Adds colData that includes patient status information
+highest6_full <- cbind(pseudo_flare$before_a_flare, highest6_chem)
+names(highest6_full)[1] <- 'before_a_flare'
+highest6_full <- na.omit(highest6_full)
+
+# Puts plots in the same picture
+gridExtra::grid.arrange(
+  
+  # Plot 1
+  ggplot(highest6_full, aes(x = before_a_flare, y = highest6_full[,2], fill = before_a_flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[2]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 2
+  ggplot(highest6_full, aes(x = before_a_flare, y = highest6_full[,3], fill = before_a_flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[3]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 3
+  ggplot(highest6_full, aes(x = before_a_flare, y = highest6_full[,4], fill = before_a_flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[4]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 4
+  ggplot(highest6_full, aes(x = before_a_flare, y = highest6_full[,5], fill = before_a_flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[5]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 5
+  ggplot(highest6_full, aes(x = before_a_flare, y = highest6_full[,6], fill = before_a_flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[6]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # Plot 6
+  ggplot(highest6_full, aes(x = before_a_flare, y = highest6_full[,7], fill = before_a_flare)) + 
+    geom_boxplot() + 
+    geom_signif(comparisons = list(c("no", "yes")), 
+                map_signif_level=TRUE) +
+    ylab("Predicted metabolite intake") + # y axis title
+    ggtitle(names(highest6_full)[7]) + # main title
+    theme_minimal() + 
+    theme(title = element_text(size = 7),
+          legend.position = 'none',
+          axis.text = element_text(size = 7),
+          axis.title.x=element_blank()), # makes titles smaller, removes x axis title
+  
+  # 3 columns and 2 rows
+  ncol = 3, 
+  nrow = 2
+)
+
+##================================================ ASSOCIATED DIET METABOLITES WITH CLINICAL OUTCOMES BASED ON LINEAR REGRESSION + VENN DIAGRAM ====================================================
 
 #Associated Diet Metabolite names based on DIAGNOSIS
 diagnosis <- as.character(linreg_diagnosis$Intake_Metabolite)
 
-#Associated Diet Metabolite names based on CALPROTECTIN
-calprotectin <- as.character(linreg_calprotectin$Intake_Metabolite)
+#Associated Diet Metabolite names based on flare
+flare <- as.character(linreg_flare$Intake_Metabolite)
 
-#Associated Diet Metabolite names based on CALPROTECTIN
+#Associated Diet Metabolite names based on flare
 flare <- as.character(linreg_flare$Intake_Metabolite)
 
 #New df containing only diet metabolites that are associated with clinical outcomes
 ## IBD vs Non-IBD
-## calprotectin <150 vs calprotectin >150
+## flare <150 vs flare >150
 ## After/During Flare vs Before Flare
 intake_mtb_diagnosis <- pseudo_diagnosis[,colnames(pseudo_diagnosis) %in% diagnosis]
-intake_mtb_calprotectin <- pseudo_calprotectin[,colnames(pseudo_calprotectin) %in% calprotectin]
+intake_mtb_flare <- pseudo_flare[,colnames(pseudo_flare) %in% flare]
 intake_mtb_flare <- pseudo_flare[,colnames(pseudo_flare) %in% flare]
 
+# Get the column names from each data frame
+col_names_diagnosis <- colnames(intake_mtb_diagnosis)
+col_names_flare <- colnames(intake_mtb_flare)
+col_names_flare <- colnames(intake_mtb_flare)
+
+# Find the common column names
+common_columns <- intersect(intersect(col_names_diagnosis, col_names_flare), col_names_flare) # 2 intake mtb: 
+diagnosis_flare <- intersect(col_names_diagnosis, col_names_flare)
+diagnosis_flare <- intersect(col_names_diagnosis, col_names_flare)
+flare_flare <- intersect(col_names_flare, col_names_flare)
+
+# Convert the metabolite lists to sets
+set1 <- unique(diagnosis)
+set2 <- unique(flare)
+set3 <- unique(flare)
+
+# Create the Venn diagram
+venn.plot <- venn.diagram(
+  x = list(set1, set2, set3),
+  category.names = c("Diagnosis", "flare", "Flare"),
+  fill = c("steelblue", "darkorange1", "forestgreen"),
+  alpha = 0.5,
+  filename = NULL  
+)
+
+# Output the Venn diagram
+grid.newpage()
+grid.draw(venn.plot)
 
 ##=========================== METABOLITES PRESENT FOR INTAKE, FECAL, SERUM ========================
 
@@ -968,24 +1269,59 @@ rownames(intfec) <- intfec$Row.names
 intfec$Row.names <- NULL
 
 #create correlation matrix
-cor = rcorr(as.matrix(intfec), type='spearman')
+cor = rcorr(as.matrix(intfec), type = "pearson")
 cor$P.adj <- p.adjust(cor$P, method = c('fdr')) # adjust P-values for multiple comparison
 cormatrix <- cor$r
 
 # Subset matrix to only show correlations between intake and fecal metabolites
 subset_rows <- grepl("^fec_", rownames(cormatrix))
 subset_columns <- grepl("^int_", colnames(cormatrix))
+subsetted_matrix <- filtered_cor[subset_rows, subset_columns]
+
+melt.matrix <- melt(subsetted_matrix)
+melt.matrix <- melt.matrix[!melt.matrix$value == -Inf,] #delete infinite correlation coefficients
+melt.matrix <- melt.matrix[!melt.matrix$value == 0,] #delete rows where correlation coefficients = 0
+
+# Sort melt.matrix based on the absolute values of the correlations
+sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TRUE), ]
+# Select the top 100 correlations
+top_100 <- sorted_correlations[1:100, ]
+
+
+ggscatter(intfec, x = "int_X35_dicaffeoylquinic_acid", y = "fec_cysteine.s.sulfate", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "3,5-dicaffeoylquinic acid", ylab = "cysteine-s-sulfate")
+
+##==================================================== CORRELATION MATRIX: INTAKE VS FECAL METABOLITES ======================================================
+
+#merge intake + fecal metabolites
+intser <- merge(filtered_intake, filtered_serum, by = "row.names", all.x = TRUE)
+rownames(intser) <- intser$Row.names
+intser$Row.names <- NULL
+
+#create correlation matrix
+cor = rcorr(as.matrix(intser), type = "pearson")
+cor$P.adj <- p.adjust(cor$P, method = c('fdr')) # adjust P-values for multiple comparison
+cormatrix <- cor$r
+
+# Subset matrix to only show correlations between intake and fecal metabolites
+subset_rows <- grepl("^ser_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
 subsetted_matrix <- cormatrix[subset_rows, subset_columns]
 
-#set threshold for spearman rho value
-threshold <- 0.5
-# convert matrix to long format and filter based on set threshold
-plot.data <- melt(subsetted_matrix) 
-plot.data <- plot.data[abs(plot.data$value) > threshold,]
+melt.matrix <- melt(subsetted_matrix)
+melt.matrix <- melt.matrix[!melt.matrix$value == -Inf,] #delete infinite correlation coefficients
+melt.matrix <- melt.matrix[!melt.matrix$value == 0,] #delete rows where correlation coefficients = 0
 
-# Sort plot.data based on the absolute values of the correlations
-sorted_correlations <- plot.data[order(abs(plot.data$value), decreasing = TRUE), ]
+# Sort melt.matrix based on the absolute values of the correlations
+sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TRUE), ]
+# Select the top 100 correlations
+top_100 <- sorted_correlations[1:100, ]
 
-# Select the top 6 correlations
-top_6 <- sorted_correlations[1:100, ]
+
+ggscatter(intser, x = "int_X20_0", y = "ser_meta_994", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Arachidic acid", ylab = "Glycerol triundecanoate")
 
