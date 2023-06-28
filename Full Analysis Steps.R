@@ -1292,10 +1292,10 @@ sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TR
 top_100 <- sorted_correlations[1:100, ]
 
 
-ggscatter(intfec, x = "int_phosphorus", y = "fec_X...1483", 
+ggscatter(intfec, x = "int_linolenic_acid", y = "fec_X...1483", 
           add = "reg.line", conf.int = TRUE, 
           cor.coef = TRUE, cor.method = "pearson",
-          xlab = "phosphorus", ylab = "fecal metabolite 1483")
+          xlab = "linolenic acid", ylab = "fecal metabolite 1483")
 
 ##==================================================== CORRELATION MATRIX: INTAKE VS SERUM METABOLITES ======================================================
 
@@ -1328,3 +1328,1041 @@ ggscatter(intser, x = "int_X20_0", y = "ser_meta_994",
           add = "reg.line", conf.int = TRUE, 
           cor.coef = TRUE, cor.method = "pearson",
           xlab = "Arachidic acid", ylab = "Glycerol triundecanoate")
+
+##================================================ FECES ================================================
+
+##========================== CORRELATION CARBOHYDRATE/FIBER METABOLITES =============================
+
+#merge intake + fecal metabolites
+intfec <- merge(filtered_intake, filtered_fecal, by = "row.names", all.x = TRUE)
+rownames(intfec) <- intfec$Row.names
+intfec$Row.names <- NULL
+
+#filter full metabolite set on carbohydrate/fiber + fecal metabolites
+# Find column names containing 'fiber'
+fiber_cols <- grep("fiber", colnames(intfec), value = TRUE)
+# Find column names containing 'carbohydrate'
+carb_cols <- grep("carbohydrate", colnames(intfec), value = TRUE)
+
+diet_mtb <- c(fiber_cols, carb_cols)
+
+# Microbial metabolites
+# Find column names containing 'propionate' (SCFA)
+propionate_cols <- grep("propionate", colnames(intfec), value = TRUE)
+# Find column names containing 'acetate' (SCFA)
+acetate_cols <- grep("acetate", colnames(intfec), value = TRUE)
+# Find column names containing 'butyrate' (SCFA)
+butyrate_cols <- grep("butyrate", colnames(intfec), value = TRUE)
+# Find column names containing 'lactate' (carboxylic acid)
+lactate_cols <- grep("lactate", colnames(intfec), value = TRUE)
+# Find column names containing 'succinate' (carboxylic acid)
+succinate_cols <- grep("succinate", colnames(intfec), value = TRUE)
+
+microbe_mtb <- c(propionate_cols, acetate_cols, butyrate_cols, lactate_cols, succinate_cols)
+
+
+# Combine diet and microbe cols
+selected_cols <- c(diet_mtb, microbe_mtb)
+
+# new df with associated diet and microbe metabolites
+intfec_carbfiber <- intfec[,selected_cols]
+
+
+#create correlation matrix
+cor = rcorr(as.matrix(intfec_carbfiber), type = "pearson")
+cor$P.adj <- p.adjust(cor$P, method = c('fdr')) # adjust P-values for multiple comparison
+
+# create matrices for R, P and P.adj
+cormatrix <- cor$r
+pmatrix <- cor$P
+padjmatrix <- cor$P.adj
+
+# Subset matrix to only show correlations between intake and fecal metabolites
+subset_rows <- grepl("^fec_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subsetted_matrix <- cormatrix[subset_rows, subset_columns]
+
+# Subset p-value to only show p-values for correlations between intake and fecal metabolites
+subset_rows <- grepl("^fec_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subset_p_matrix <- pmatrix[subset_rows, subset_columns]
+
+melt.matrix <- melt(subsetted_matrix)
+melt.matrix$p.value <- round(melt(subset_p_matrix)$value, 3) # add p-values to plot dataset
+melt.matrix$p.value.adj <- p.adjust(melt.matrix$p.value, method = c('fdr')) # adjust P-values for multiple comparison
+melt.matrix$stars <- cut(melt.matrix$p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))  # Create column of significance labels
+melt.matrix$stars.adj <- cut(melt.matrix$p.value.adj, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))
+
+melt.matrix <- melt.matrix[!melt.matrix$value == -Inf,] #delete infinite correlation coefficients
+melt.matrix <- melt.matrix[!melt.matrix$value == 0,] #delete rows where correlation coefficients = 0
+
+# Sort melt.matrix based on the absolute values of the correlations
+sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TRUE), ]
+# Select the top 100 correlations
+top_100 <- sorted_correlations[1:100, ]
+
+# ========== 2. PLOT MATRIX USING GGPLOT ======== ##
+
+ggplot(top_100, aes(x = Var1, y = Var2)) +
+  geom_tile(colour="grey20", aes(fill=value), size=0.2) + 
+  scale_fill_gradient2(name = "Pearson's rho", low="navyblue", high="red", midpoint=0, limits=c(-1,1)) +
+  labs(x="",y="") +
+  ggtitle("\nCorrelations\nDietary carbohydrate/fiber and microbial metabolites\n") +
+  geom_text(aes(label=stars), position=position_nudge(y=0.15), color="black", size=3) + 
+  geom_text(aes(label=sprintf("%1.2f", value)), position=position_nudge(y=-0.1), 
+            size=2, colour="black") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -45, hjust = 0, size=8)) + 
+  theme(axis.text.y=element_text(angle = 0, hjust = 1, size=8)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggscatter(intfec_carbfiber, x = "int_fiber_dietary", y = "fec_methylsuccinate", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "dietary fiber", ylab = "methylsuccinate")
+
+##========================== CORRELATION AMINO ACID METABOLITES =============================
+
+#merge intake + fecal metabolites
+intfec <- merge(filtered_intake, filtered_fecal, by = "row.names", all.x = TRUE)
+rownames(intfec) <- intfec$Row.names
+intfec$Row.names <- NULL
+
+#filter full metabolite set on amino acids + fecal metabolites
+# Find column names containing 'protein'
+protein_cols <- grep("protein", colnames(intfec), value = TRUE)
+# Find column names containing 'alanine'
+alanine_cols <- grep("alanine", colnames(intfec), value = TRUE)
+# Find column names containing 'arginine'
+arginine_cols <- grep("arginine", colnames(intfec), value = TRUE)
+# Find column names containing 'asparagine'
+asparagine_cols <- grep("asparagine", colnames(intfec), value = TRUE)
+# Find column names containing 'aspartic'
+aspartic_cols <- grep("aspartic", colnames(intfec), value = TRUE)
+# Find column names containing 'cysteine'
+cysteine_cols <- grep("cysteine", colnames(intfec), value = TRUE)
+# Find column names containing 'glutamic'
+glutamic_cols <- grep("glutamic", colnames(intfec), value = TRUE)
+# Find column names containing 'glutamine'
+glutamine_cols <- grep("glutamine", colnames(intfec), value = TRUE)
+# Find column names containing 'glycine'
+glycine_cols <- grep("glycine", colnames(intfec), value = TRUE)
+# Find column names containing 'histidine'
+histidine_cols <- grep("histidine", colnames(intfec), value = TRUE)
+# Find column names containing 'isoleucine'
+isoleucine_cols <- grep("isoleucine", colnames(intfec), value = TRUE)
+# Find column names containing 'leucine'
+leucine_cols <- grep("leucine", colnames(intfec), value = TRUE)
+# Find column names containing 'lysine'
+lysine_cols <- grep("lysine", colnames(intfec), value = TRUE)
+# Find column names containing 'methionine'
+methionine_cols <- grep("methionine", colnames(intfec), value = TRUE)
+# Find column names containing 'phenylalanine'
+phenylalanine_cols <- grep("phenylalanine", colnames(intfec), value = TRUE)
+# Find column names containing 'proline'
+proline_cols <- grep("proline", colnames(intfec), value = TRUE)
+# Find column names containing 'serine'
+serine_cols <- grep("serine", colnames(intfec), value = TRUE)
+# Find column names containing 'threonine'
+threonine_cols <- grep("threonine", colnames(intfec), value = TRUE)
+# Find column names containing 'tryptophan'
+tryptophan_cols <- grep("tryptophan", colnames(intfec), value = TRUE)
+# Find column names containing 'tyrosine'
+tyrosine_cols <- grep("tyrosine", colnames(intfec), value = TRUE)
+# Find column names containing 'alanine'
+valine_cols <- grep("valine", colnames(intfec), value = TRUE)
+# Find column names containing 'selenocysteine'
+selenocysteine_cols <- grep("selenocysteine", colnames(intfec), value = TRUE)
+
+diet_mtb <- c(protein_cols, alanine_cols, arginine_cols, asparagine_cols, aspartic_cols, 
+              cysteine_cols, glutamine_cols, glutamic_cols, glycine_cols, histidine_cols, 
+              isoleucine_cols, leucine_cols, lysine_cols, methionine_cols, phenylalanine_cols, 
+              proline_cols, serine_cols, threonine_cols, tryptophan_cols, tyrosine_cols,
+              valine_cols, selenocysteine_cols)
+
+# Microbial metabolites
+# Find column names containing 'valine' (BCAA)
+valine_cols <- grep("valine", colnames(intfec), value = TRUE)
+# Find column names containing 'isoleucine' (BCAA)
+isoleucine_cols <- grep("isoleucine", colnames(intfec), value = TRUE)
+# Find column names containing 'leucine' (BCAA)
+leucine_cols <- grep("leucine", colnames(intfec), value = TRUE)
+# Find column names containing 'niacin' 
+niacin_cols <- grep("niacin", colnames(intfec), value = TRUE)
+# Find column names containing 'nicotinamide'
+nicotinamide_cols <- grep("nicotinamide", colnames(intfec), value = TRUE)
+# Find column names containing 'aminovaleric'
+aminovaleric_cols <- grep("aminovaleric", colnames(intfec), value = TRUE)
+# Find column names containing 'dimethylglycine'
+dimethylglycine_cols <- grep("dimethylglycine", colnames(intfec), value = TRUE)
+# Find column names containing 'acetylglycine'
+acetylglycine_cols <- grep("acetylglycine", colnames(intfec), value = TRUE)
+
+
+microbe_mtb <- c(valine_cols, isoleucine_cols, leucine_cols, niacin_cols, nicotinamide_cols,
+                 aminovaleric_cols, dimethylglycine_cols, acetylglycine_cols)
+
+
+# Combine diet and microbe cols
+selected_cols <- c(diet_mtb, microbe_mtb)
+
+# new df with associated diet and microbe metabolites
+intfec_aminoacid <- intfec[,selected_cols]
+
+
+#create correlation matrix
+cor = rcorr(as.matrix(intfec_aminoacid), type = "pearson")
+cor$P.adj <- p.adjust(cor$P, method = c('fdr')) # adjust P-values for multiple comparison
+
+# create matrices for R, P and P.adj
+cormatrix <- cor$r
+pmatrix <- cor$P
+padjmatrix <- cor$P.adj
+
+# Subset matrix to only show correlations between intake and fecal metabolites
+subset_rows <- grepl("^fec_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subsetted_matrix <- cormatrix[subset_rows, subset_columns]
+
+# Subset p-value to only show p-values for correlations between intake and fecal metabolites
+subset_rows <- grepl("^fec_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subset_p_matrix <- pmatrix[subset_rows, subset_columns]
+
+melt.matrix <- melt(subsetted_matrix)
+melt.matrix$p.value <- round(melt(subset_p_matrix)$value, 3) # add p-values to plot dataset
+melt.matrix$p.value.adj <- p.adjust(melt.matrix$p.value, method = c('fdr')) # adjust P-values for multiple comparison
+melt.matrix$stars <- cut(melt.matrix$p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))  # Create column of significance labels
+melt.matrix$stars.adj <- cut(melt.matrix$p.value.adj, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))
+
+melt.matrix <- melt.matrix[!melt.matrix$value == -Inf,] #delete infinite correlation coefficients
+melt.matrix <- melt.matrix[!melt.matrix$value == 0,] #delete rows where correlation coefficients = 0
+
+# Sort melt.matrix based on the absolute values of the correlations
+sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TRUE), ]
+# Select the top 100 correlations
+top_100 <- sorted_correlations[1:100, ]
+
+# ========== 2. PLOT MATRIX USING GGPLOT ======== ##
+
+ggplot(top_100, aes(x = Var1, y = Var2)) +
+  geom_tile(colour="grey20", aes(fill=value), size=0.2) + 
+  scale_fill_gradient2(name = "Pearson's rho", low="navyblue", high="red", midpoint=0, limits=c(-1,1)) +
+  labs(x="",y="") +
+  ggtitle("\nCorrelations\nDietary amino acids and microbial metabolites\n") +
+  geom_text(aes(label=stars.adj), position=position_nudge(y=0.15), color="black", size=3) + 
+  geom_text(aes(label=sprintf("%1.2f", value)), position=position_nudge(y=-0.1), 
+            size=2, colour="black") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -45, hjust = 0, size=8)) + 
+  theme(axis.text.y=element_text(angle = 0, hjust = 1, size=8)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggscatter(intfec_aminoacid, x = "int_alpha_tryptophan", y = "fec_N.lactoyl.leucine", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "dietary alpha tryptophan", ylab = "N-lactoyl-leucine")
+
+##========================== CORRELATION TRYPTOPHAN METABOLITES =============================
+
+#merge intake + fecal metabolites
+intfec <- merge(filtered_intake, filtered_fecal, by = "row.names", all.x = TRUE)
+rownames(intfec) <- intfec$Row.names
+intfec$Row.names <- NULL
+
+#filter full metabolite set on tryptophan + fecal metabolites
+# Find column names containing 'tryptophan'
+tryptophan_cols <- grep("tryptophan", colnames(intfec), value = TRUE)
+
+diet_mtb <- c(tryptophan_cols)
+
+# Microbial metabolites
+# Find column names containing 'indole' 
+indole_cols <- grep("indole", colnames(intfec), value = TRUE)
+# Find column names containing 'indoxylsulfate' (IS) 
+indoxylsulfate_cols <- grep("indoxylsulfate", colnames(intfec), value = TRUE)
+# Find column names containing 'tryptamine'
+tryptamine_cols <- grep("tryptamine", colnames(intfec), value = TRUE)
+
+
+microbe_mtb <- c(indole_cols, indoxylsulfate_cols, tryptamine_cols)
+
+# Combine diet and microbe cols
+selected_cols <- c(diet_mtb, microbe_mtb)
+
+# new df with associated diet and microbe metabolites
+intfec_tryptophan <- intfec[,selected_cols]
+
+
+#create correlation matrix
+cor = rcorr(as.matrix(intfec_tryptophan), type = "pearson")
+cor$P.adj <- p.adjust(cor$P, method = c('fdr')) # adjust P-values for multiple comparison
+
+# create matrices for R, P and P.adj
+cormatrix <- cor$r
+pmatrix <- cor$P
+padjmatrix <- cor$P.adj
+
+# Subset matrix to only show correlations between intake and fecal metabolites
+subset_rows <- grepl("^fec_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subsetted_matrix <- cormatrix[subset_rows, subset_columns]
+
+# Subset p-value to only show p-values for correlations between intake and fecal metabolites
+subset_rows <- grepl("^fec_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subset_p_matrix <- pmatrix[subset_rows, subset_columns]
+
+melt.matrix <- melt(subsetted_matrix)
+melt.matrix$p.value <- round(melt(subset_p_matrix)$value, 3) # add p-values to plot dataset
+melt.matrix$p.value.adj <- p.adjust(melt.matrix$p.value, method = c('fdr')) # adjust P-values for multiple comparison
+melt.matrix$stars <- cut(melt.matrix$p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))  # Create column of significance labels
+melt.matrix$stars.adj <- cut(melt.matrix$p.value.adj, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))
+
+melt.matrix <- melt.matrix[!melt.matrix$value == -Inf,] #delete infinite correlation coefficients
+melt.matrix <- melt.matrix[!melt.matrix$value == 0,] #delete rows where correlation coefficients = 0
+melt.matrix <- melt.matrix[!is.na(melt.matrix$value),]
+# Sort melt.matrix based on the absolute values of the correlations
+sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TRUE), ]
+# Select the top 100 correlations
+top_100 <- sorted_correlations[1:60, ]
+
+
+# ========== 2. PLOT MATRIX USING GGPLOT ======== ##
+
+ggplot(top_100, aes(x = Var1, y = Var2)) +
+  geom_tile(colour="grey20", aes(fill=value), size=0.2) + 
+  scale_fill_gradient2(name = "Pearson's rho", low="navyblue", high="red", midpoint=0, limits=c(-1,1)) +
+  labs(x="",y="") +
+  ggtitle("\nCorrelations\nDietary tryptophan and microbial metabolites\n") +
+  geom_text(aes(label=stars), position=position_nudge(y=0.15), color="black", size=3) + 
+  geom_text(aes(label=sprintf("%1.2f", value)), position=position_nudge(y=-0.1), 
+            size=2, colour="black") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -45, hjust = 0, size=8)) + 
+  theme(axis.text.y=element_text(angle = 0, hjust = 1, size=8)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggscatter(intfec_tryptophan, x = "int_d_tryptophan", y = "fec_X5.hydroxyindoleacetate", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "dietary D-tryptophan", ylab = "5-hydroxyindoleacetate")
+
+##========================== CORRELATION POLYPHENOL METABOLITES =============================
+
+#merge intake + fecal metabolites
+intfec <- merge(filtered_intake, filtered_fecal, by = "row.names", all.x = TRUE)
+rownames(intfec) <- intfec$Row.names
+intfec$Row.names <- NULL
+
+#filter full metabolite set on polyphenols + fecal metabolites
+# Find column names containing 'polyphenol'
+polyphenol_cols <- grep("polyphenol", colnames(intfec), value = TRUE)
+
+#flavonoids
+# Find column names containing 'epicatechin'
+epicatechin_cols <- grep("epicatechin", colnames(intfec), value = TRUE)
+# Find column names containing 'catechin'
+catechin_cols <- grep("catechin", colnames(intfec), value = TRUE)
+# Find column names containing 'epigallocatechin'
+epigallocatechin_cols <- grep("epigallocatechin", colnames(intfec), value = TRUE)
+# Find column names containing 'hesperatin'
+hesperatin_cols <- grep("hesperatin", colnames(intfec), value = TRUE)
+# Find column names containing 'naringenin'
+naringenin_cols <- grep("naringenin", colnames(intfec), value = TRUE)
+# Find column names containing 'eriodictyol'
+eriodictyol_cols <- grep("eriodictyol", colnames(intfec), value = TRUE)
+# Find column names containing 'apigenin'
+apigenin_cols <- grep("apigenin", colnames(intfec), value = TRUE)
+# Find column names containing 'luteolin'
+luteolin_cols <- grep("luteolin", colnames(intfec), value = TRUE)
+# Find column names containing 'tangeritin'
+tangeritin_cols <- grep("tangeritin", colnames(intfec), value = TRUE)
+# Find column names containing 'chrysin'
+chrysin_cols <- grep("chrysin", colnames(intfec), value = TRUE)
+# Find column names containing 'genistein'
+genistein_cols <- grep("genistein", colnames(intfec), value = TRUE)
+# Find column names containing 'daidzein'
+daidzein_cols <- grep("daidzein", colnames(intfec), value = TRUE)
+# Find column names containing 'kaempferol'
+kaempferol_cols <- grep("kaempferol", colnames(intfec), value = TRUE)
+# Find column names containing 'myrestin'
+myrestin_cols <- grep("myrestin", colnames(intfec), value = TRUE)
+# Find column names containing 'quercetin'
+quercetin_cols <- grep("quercetin", colnames(intfec), value = TRUE)
+# Find column names containing 'cyanidin'
+cyanidin_cols <- grep("cyanidin", colnames(intfec), value = TRUE)
+# Find column names containing 'delphinidin'
+delphinidin_cols <- grep("delphinidin", colnames(intfec), value = TRUE)
+# Find column names containing 'malvedin'
+malvedin_cols <- grep("malvedin", colnames(intfec), value = TRUE)
+# Find column names containing 'pelargonidin'
+pelargonidin_cols <- grep("pelargonidin", colnames(intfec), value = TRUE)
+
+flavonoids <- c(polyphenol_cols, epicatechin_cols, catechin_cols, epigallocatechin_cols,
+                hesperatin_cols, naringenin_cols, eriodictyol_cols, apigenin_cols, luteolin_cols,
+                tangeritin_cols, chrysin_cols, genistein_cols, daidzein_cols, kaempferol_cols,
+                myrestin_cols, quercetin_cols, cyanidin_cols, delphinidin_cols, malvedin_cols, 
+                pelargonidin_cols)
+
+#phenolic acids
+# Find column names containing 'hydroxybenzoic'
+hydroxybenzoic_cols <- grep("hydroxybenzoic", colnames(intfec), value = TRUE)
+# Find column names containing 'protocatechuic'
+protocatechuic_cols <- grep("protocatechuic", colnames(intfec), value = TRUE)
+# Find column names containing 'gallic'
+gallic_cols <- grep("gallic", colnames(intfec), value = TRUE)
+# Find column names containing 'vanillic'
+vanillic_cols <- grep("vanillic", colnames(intfec), value = TRUE)
+# Find column names containing 'ellagic'
+ellagic_cols <- grep("ellagic", colnames(intfec), value = TRUE)
+# Find column names containing 'salicyclic'
+salicyclic_cols <- grep("salicyclic", colnames(intfec), value = TRUE)
+# Find column names containing 'caffeic'
+caffeic_cols <- grep("caffeic", colnames(intfec), value = TRUE)
+# Find column names containing 'ferulic'
+ferulic_cols <- grep("ferulic", colnames(intfec), value = TRUE)
+# Find column names containing 'sinapic'
+sinapic_cols <- grep("sinapic", colnames(intfec), value = TRUE)
+# Find column names containing 'chlorogenic'
+chlorogenic_cols <- grep("chlorogenic", colnames(intfec), value = TRUE)
+# Find column names containing 'coumaric'
+coumaric_cols <- grep("coumaric", colnames(intfec), value = TRUE)
+# Find column names containing 'quinic'
+quinic_cols <- grep("quinic", colnames(intfec), value = TRUE)
+# Find column names containing 'resveratrol'
+resveratrol_cols <- grep("resveratrol", colnames(intfec), value = TRUE)
+
+phenols <- c(hydroxybenzoic_cols, protocatechuic_cols, gallic_cols, vanillic_cols,
+             ellagic_cols, salicyclic_cols, caffeic_cols, ferulic_cols, sinapic_cols,
+             chlorogenic_cols, coumaric_cols, quinic_cols, resveratrol_cols)
+
+diet_mtb <- c(flavonoids, phenols)
+
+# Microbial metabolites
+# Find column names containing 'quercetin' 
+quercetin_cols <- grep("quercetin", colnames(intfec), value = TRUE)
+# Find column names containing 'apigenin'
+apigenin_cols <- grep("apigenin", colnames(intfec), value = TRUE)
+# Find column names containing 'naringenin'
+naringenin_cols <- grep("naringenin", colnames(intfec), value = TRUE)
+
+
+microbe_mtb <- c(quercetin_cols, apigenin_cols, naringenin_cols)
+
+
+# Combine diet and microbe cols
+selected_cols <- c(diet_mtb, microbe_mtb)
+
+# new df with associated diet and microbe metabolites
+intfec_polyphenol <- intfec[,selected_cols]
+
+
+#create correlation matrix
+cor = rcorr(as.matrix(intfec_polyphenol), type = "pearson")
+cor$P.adj <- p.adjust(cor$P, method = c('fdr')) # adjust P-values for multiple comparison
+
+# create matrices for R, P and P.adj
+cormatrix <- cor$r
+pmatrix <- cor$P
+padjmatrix <- cor$P.adj
+
+# Subset matrix to only show correlations between intake and fecal metabolites
+subset_rows <- grepl("^fec_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subsetted_matrix <- cormatrix[subset_rows, subset_columns]
+
+# Subset p-value to only show p-values for correlations between intake and fecal metabolites
+subset_rows <- grepl("^fec_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subset_p_matrix <- pmatrix[subset_rows, subset_columns]
+
+melt.matrix <- melt(subsetted_matrix)
+melt.matrix$p.value <- round(melt(subset_p_matrix)$value, 3) # add p-values to plot dataset
+melt.matrix$p.value.adj <- p.adjust(melt.matrix$p.value, method = c('fdr')) # adjust P-values for multiple comparison
+melt.matrix$stars <- cut(melt.matrix$p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))  # Create column of significance labels
+melt.matrix$stars.adj <- cut(melt.matrix$p.value.adj, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))
+
+melt.matrix <- melt.matrix[!melt.matrix$value == -Inf,] #delete infinite correlation coefficients
+melt.matrix <- melt.matrix[!melt.matrix$value == 0,] #delete rows where correlation coefficients = 0
+melt.matrix <- melt.matrix[!is.na(melt.matrix$value),]
+# Sort melt.matrix based on the absolute values of the correlations
+sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TRUE), ]
+# Select the top 100 correlations
+top_100 <- sorted_correlations[1:100, ]
+
+
+# ========== 2. PLOT MATRIX USING GGPLOT ======== ##
+
+ggplot(top_100, aes(x = Var1, y = Var2)) +
+  geom_tile(colour="grey20", aes(fill=value), size=0.2) + 
+  scale_fill_gradient2(name = "Pearson's rho", low="navyblue", high="red", midpoint=0, limits=c(-1,1)) +
+  labs(x="",y="") +
+  ggtitle("\nCorrelations\nDietary polyphenols and microbial metabolites\n") +
+  geom_text(aes(label=stars.adj), position=position_nudge(y=0.2), color="black", size=3) + 
+  geom_text(aes(label=sprintf("%1.2f", value)), position=position_nudge(y=-0.1), 
+            size=2, colour="black") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -45, hjust = 0, size=6)) + 
+  theme(axis.text.y=element_text(angle = 0, hjust = 1, size=6)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggscatter(intfec_polyphenol, x = "int_X4_hydroxybenzoic_acid", y = "fec_apigenin", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "dietary 4-hydroxybenzoic acid", ylab = "apigenin")
+
+##========================== CORRELATION CHOLINE/L-CARNITINE METABOLITES =============================
+
+#merge intake + fecal metabolites
+intfec <- merge(filtered_intake, filtered_fecal, by = "row.names", all.x = TRUE)
+rownames(intfec) <- intfec$Row.names
+intfec$Row.names <- NULL
+
+#filter full metabolite set on Choline/L-Carnitine + fecal metabolites
+# Find column names containing 'choline'
+choline_cols <- grep("choline", colnames(intfec), value = TRUE)
+# Find column names containing 'carnitine'
+carnitine_cols <- grep("carnitine", colnames(intfec), value = TRUE)
+
+diet_mtb <- c(choline_cols, carnitine_cols)
+
+# Microbial metabolites
+# Find column names containing 'trimethylamine' 
+trimethylamine_cols <- grep("trimethylamine", colnames(intfec), value = TRUE)
+
+
+microbe_mtb <- c(trimethylamine_cols)
+
+
+# Combine diet and microbe cols
+selected_cols <- c(diet_mtb, microbe_mtb)
+
+# new df with associated diet and microbe metabolites
+intfec_cholinelcarnitine <- intfec[,selected_cols]
+
+
+#create correlation matrix
+cor = rcorr(as.matrix(intfec_cholinelcarnitine), type = "pearson")
+cor$P.adj <- p.adjust(cor$P, method = c('fdr')) # adjust P-values for multiple comparison
+
+# create matrices for R, P and P.adj
+cormatrix <- cor$r
+pmatrix <- cor$P
+padjmatrix <- cor$P.adj
+
+# Subset matrix to only show correlations between intake and fecal metabolites
+subset_rows <- grepl("^fec_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subsetted_matrix <- cormatrix[subset_rows, subset_columns]
+
+# Subset p-value to only show p-values for correlations between intake and fecal metabolites
+subset_rows <- grepl("^fec_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subset_p_matrix <- pmatrix[subset_rows, subset_columns]
+
+melt.matrix <- melt(subsetted_matrix)
+melt.matrix$p.value <- round(melt(subset_p_matrix)$value, 3) # add p-values to plot dataset
+melt.matrix$p.value.adj <- p.adjust(melt.matrix$p.value, method = c('fdr')) # adjust P-values for multiple comparison
+melt.matrix$stars <- cut(melt.matrix$p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))  # Create column of significance labels
+melt.matrix$stars.adj <- cut(melt.matrix$p.value.adj, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))
+
+melt.matrix <- melt.matrix[!melt.matrix$value == -Inf,] #delete infinite correlation coefficients
+melt.matrix <- melt.matrix[!melt.matrix$value == 0,] #delete rows where correlation coefficients = 0
+melt.matrix <- melt.matrix[!is.na(melt.matrix$value),]
+# Sort melt.matrix based on the absolute values of the correlations
+sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TRUE), ]
+# Select the top 100 correlations
+top_100 <- sorted_correlations[1:100, ]
+
+
+# ========== 2. PLOT MATRIX USING GGPLOT ======== ##
+
+ggplot(top_100, aes(x = Var1, y = Var2)) +
+  geom_tile(colour="grey20", aes(fill=value), size=0.2) + 
+  scale_fill_gradient2(name = "Pearson's rho", low="navyblue", high="red", midpoint=0, limits=c(-1,1)) +
+  labs(x="",y="") +
+  ggtitle("\nCorrelations\nDietary choline or L-carnitine and microbial metabolites\n") +
+  geom_text(aes(label=stars), position=position_nudge(y=0.2), color="black", size=3) + 
+  geom_text(aes(label=sprintf("%1.2f", value)), position=position_nudge(y=-0.1), 
+            size=2, colour="black") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -45, hjust = 0, size=8)) + 
+  theme(axis.text.y=element_text(angle = 0, hjust = 1, size=8)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggscatter(intfec_cholinelcarnitine, x = "int_phosphatidyl_choline", y = "fec_trimethylamine.N.oxide", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "dietary phosphatidyl-choline", ylab = "trimethylamine-N-oxide")
+
+##=================================================== SERUM ========================================
+
+
+##========================== CORRELATION CARBOHYDRATE/FIBER METABOLITES =============================
+
+#merge intake + seral metabolites
+intser <- merge(filtered_intake, filtered_serum, by = "row.names", all.x = TRUE)
+rownames(intser) <- intser$Row.names
+intser$Row.names <- NULL
+
+#filter full metabolite set on carbohydrate/fiber + serum metabolites
+# Find column names containing 'fiber'
+fiber_cols <- grep("fiber", colnames(intser), value = TRUE)
+# Find column names containing 'carbohydrate'
+carb_cols <- grep("carbohydrate", colnames(intser), value = TRUE)
+
+diet_mtb <- c(fiber_cols, carb_cols)
+
+# Serum metabolites
+# Find column names containing 'propionate' (SCFA)
+propionate_cols <- grep(c("meta_394", 'meta_433') , colnames(intser), value = TRUE)
+# Find column names containing 'acetate' (SCFA)
+acetate_cols <- grep(c("meta_316", 'meta_366', 'meta_374', 'meta_399', 
+                       'meta_443', 'meta_465', 'meta_576', 'meta_584',
+                       'meta_587', 'meta_697', 'meta_721', 'meta_798',
+                       'meta_835', 'meta_927', 'meta_169', 'meta_287'), colnames(intser), value = TRUE)
+# Find column names containing 'butyrate' (SCFA)
+butyrate_cols <- grep(c('meta_866', 'meta_299'), colnames(intser), value = TRUE)
+# Find column names containing 'succinate' (carboxylic acid)
+succinate_cols <- grep("meta_421", colnames(intser), value = TRUE)
+
+microbe_mtb <- c(propionate_cols, acetate_cols, butyrate_cols, succinate_cols)
+
+
+# Combine diet and microbe cols
+selected_cols <- c(diet_mtb, microbe_mtb)
+
+# new df with associated diet and serum metabolites
+intser_carbfiber <- intser[,selected_cols]
+
+
+#create correlation matrix
+cor = rcorr(as.matrix(intser_carbfiber), type = "pearson")
+
+# create matrices for R, P and P.adj
+cormatrix <- cor$r
+pmatrix <- cor$P
+
+# Subset matrix to only show correlations between intake and serum metabolites
+subset_rows <- grepl("^ser_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subsetted_matrix <- cormatrix[subset_rows, subset_columns]
+
+# Subset p-value to only show p-values for correlations between intake and serym metabolites
+subset_rows <- grepl("^ser_", rownames(pmatrix))
+subset_columns <- grepl("^int_", colnames(pmatrix))
+subset_p_matrix <- pmatrix[subset_rows, subset_columns]
+
+melt.matrix <- melt(subsetted_matrix)
+melt.matrix$p.value <- round(melt(subset_p_matrix)$value, 3) # add p-values to plot dataset
+melt.matrix$p.value.adj <- p.adjust(melt.matrix$p.value, method = c('fdr')) # adjust P-values for multiple comparison
+melt.matrix$stars <- cut(melt.matrix$p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))  # Create column of significance labels
+melt.matrix$stars.adj <- cut(melt.matrix$p.value.adj, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))
+
+melt.matrix <- melt.matrix[!melt.matrix$value == -Inf,] #delete infinite correlation coefficients
+melt.matrix <- melt.matrix[!melt.matrix$value == 0,] #delete rows where correlation coefficients = 0
+
+# Sort melt.matrix based on the absolute values of the correlations
+sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TRUE), ]
+# Select the top 100 correlations
+top_100 <- sorted_correlations[1:32, ]
+
+# ========== 2. PLOT MATRIX USING GGPLOT ======== ##
+
+ggplot(top_100, aes(x = Var1, y = Var2)) +
+  geom_tile(colour="grey20", aes(fill=value), size=0.2) + 
+  scale_fill_gradient2(name = "Pearson's rho", low="navyblue", high="red", midpoint=0, limits=c(-1,1)) +
+  labs(x="",y="") +
+  ggtitle("\nCorrelations\nDietary carbohydrate/fiber and serum metabolites\n") +
+  geom_text(aes(label=stars.adj), position=position_nudge(y=0.15), color="black", size=3) + 
+  geom_text(aes(label=sprintf("%1.2f", value)), position=position_nudge(y=-0.1), 
+            size=2, colour="black") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -45, hjust = 0, size=8)) + 
+  theme(axis.text.y=element_text(angle = 0, hjust = 1, size=8)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggscatter(intser_carbfiber, x = "int_carbohydrates", y = "ser_meta_421", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "dietary carbohydrates", ylab = "(R)-2-benzylsuccinate")
+
+##========================== CORRELATION AMINO ACID METABOLITES =============================
+
+#merge intake + seral metabolites
+intser <- merge(filtered_intake, filtered_serum, by = "row.names", all.x = TRUE)
+rownames(intser) <- intser$Row.names
+intser$Row.names <- NULL
+
+#filter full metabolite set on amino acids + seral metabolites
+# Find column names containing 'protein'
+protein_cols <- grep("protein", colnames(intser), value = TRUE)
+# Find column names containing 'alanine'
+alanine_cols <- grep("alanine", colnames(intser), value = TRUE)
+# Find column names containing 'arginine'
+arginine_cols <- grep("arginine", colnames(intser), value = TRUE)
+# Find column names containing 'asparagine'
+asparagine_cols <- grep("asparagine", colnames(intser), value = TRUE)
+# Find column names containing 'aspartic'
+aspartic_cols <- grep("aspartic", colnames(intser), value = TRUE)
+# Find column names containing 'cysteine'
+cysteine_cols <- grep("cysteine", colnames(intser), value = TRUE)
+# Find column names containing 'glutamic'
+glutamic_cols <- grep("glutamic", colnames(intser), value = TRUE)
+# Find column names containing 'glutamine'
+glutamine_cols <- grep("glutamine", colnames(intser), value = TRUE)
+# Find column names containing 'glycine'
+glycine_cols <- grep("glycine", colnames(intser), value = TRUE)
+# Find column names containing 'histidine'
+histidine_cols <- grep("histidine", colnames(intser), value = TRUE)
+# Find column names containing 'isoleucine'
+isoleucine_cols <- grep("isoleucine", colnames(intser), value = TRUE)
+# Find column names containing 'leucine'
+leucine_cols <- grep("leucine", colnames(intser), value = TRUE)
+# Find column names containing 'lysine'
+lysine_cols <- grep("lysine", colnames(intser), value = TRUE)
+# Find column names containing 'methionine'
+methionine_cols <- grep("methionine", colnames(intser), value = TRUE)
+# Find column names containing 'phenylalanine'
+phenylalanine_cols <- grep("phenylalanine", colnames(intser), value = TRUE)
+# Find column names containing 'proline'
+proline_cols <- grep("proline", colnames(intser), value = TRUE)
+# Find column names containing 'serine'
+serine_cols <- grep("serine", colnames(intser), value = TRUE)
+# Find column names containing 'threonine'
+threonine_cols <- grep("threonine", colnames(intser), value = TRUE)
+# Find column names containing 'tryptophan'
+tryptophan_cols <- grep("tryptophan", colnames(intser), value = TRUE)
+# Find column names containing 'tyrosine'
+tyrosine_cols <- grep("tyrosine", colnames(intser), value = TRUE)
+# Find column names containing 'alanine'
+valine_cols <- grep("valine", colnames(intser), value = TRUE)
+# Find column names containing 'selenocysteine'
+selenocysteine_cols <- grep("selenocysteine", colnames(intser), value = TRUE)
+
+diet_mtb <- c(protein_cols, alanine_cols, arginine_cols, asparagine_cols, aspartic_cols, 
+              cysteine_cols, glutamine_cols, glutamic_cols, glycine_cols, histidine_cols, 
+              isoleucine_cols, leucine_cols, lysine_cols, methionine_cols, phenylalanine_cols, 
+              proline_cols, serine_cols, threonine_cols, tryptophan_cols, tyrosine_cols,
+              valine_cols, selenocysteine_cols)
+
+# Serum metabolites
+# Find column names containing 'valine' (BCAA)
+valine_cols <- grep(c('meta_613', 'meta_406'), colnames(intser), value = TRUE)
+# Find column names containing 'isoleucine' (BCAA)
+isoleucine_cols <- grep(c('meta_540', 'meta_544', 'meta_628', 'meta_134', 'meta_397'), colnames(intser), value = TRUE)
+# Find column names containing 'leucine' (BCAA)
+leucine_cols <- grep(c('meta_549'), colnames(intser), value = TRUE)
+# Find column names containing 'niacin' 
+niacin_cols <- c('ser_meta_105')
+# Find column names containing 'nicotinamide'
+nicotinamide_cols <- grep(c('meta_155', 'meta_158'), colnames(intser), value = TRUE)
+# Find column names containing 'dimethylglycine'
+dimethylglycine_cols <- c('ser_meta_55')
+# Find column names containing 'acetylglycine'
+acetylglycine_cols <- c('ser_meta_90', 'ser_meta_179')
+
+microbe_mtb <- c(valine_cols, isoleucine_cols, leucine_cols, niacin_cols, nicotinamide_cols, dimethylglycine_cols, acetylglycine_cols)
+
+
+# Combine diet and microbe cols
+selected_cols <- c(diet_mtb, microbe_mtb)
+
+# new df with associated diet and serum metabolites
+intser_aminoacid <- intser[,selected_cols]
+
+
+#create correlation matrix
+cor = rcorr(as.matrix(intser_aminoacid), type = "pearson")
+
+# create matrices for R, P and P.adj
+cormatrix <- cor$r
+pmatrix <- cor$P
+
+# Subset matrix to only show correlations between intake and seral metabolites
+subset_rows <- grepl("^ser_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subsetted_matrix <- cormatrix[subset_rows, subset_columns]
+
+# Subset p-value to only show p-values for correlations between intake and seral metabolites
+subset_rows <- grepl("^ser_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subset_p_matrix <- pmatrix[subset_rows, subset_columns]
+
+melt.matrix <- melt(subsetted_matrix)
+melt.matrix$p.value <- round(melt(subset_p_matrix)$value, 3) # add p-values to plot dataset
+melt.matrix$p.value.adj <- p.adjust(melt.matrix$p.value, method = c('fdr')) # adjust P-values for multiple comparison
+melt.matrix$stars <- cut(melt.matrix$p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))  # Create column of significance labels
+melt.matrix$stars.adj <- cut(melt.matrix$p.value.adj, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))
+
+melt.matrix <- melt.matrix[!melt.matrix$value == -Inf,] #delete infinite correlation coefficients
+melt.matrix <- melt.matrix[!melt.matrix$value == 0,] #delete rows where correlation coefficients = 0
+
+# Sort melt.matrix based on the absolute values of the correlations
+sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TRUE), ]
+# Select the top 100 correlations
+top_100 <- sorted_correlations[1:100, ]
+
+# ========== 2. PLOT MATRIX USING GGPLOT ======== ##
+
+ggplot(top_100, aes(x = Var1, y = Var2)) +
+  geom_tile(colour="grey20", aes(fill=value), size=0.2) + 
+  scale_fill_gradient2(name = "Pearson's rho", low="navyblue", high="red", midpoint=0, limits=c(-1,1)) +
+  labs(x="",y="") +
+  ggtitle("\nCorrelations\nDietary amino acids and serum metabolites\n") +
+  geom_text(aes(label=stars.adj), position=position_nudge(y=0.15), color="black", size=3) + 
+  geom_text(aes(label=sprintf("%1.2f", value)), position=position_nudge(y=-0.1), 
+            size=2, colour="black") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -45, hjust = 0, size=8)) + 
+  theme(axis.text.y=element_text(angle = 0, hjust = 1, size=8)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggscatter(intser_aminoacid, x = "int_protein", y = "ser_meta_105", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "dietary protein", ylab = "niacinamide")
+
+##========================== CORRELATION TRYPTOPHAN METABOLITES =============================
+
+#merge intake + serum metabolites
+intser <- merge(filtered_intake, filtered_serum, by = "row.names", all.x = TRUE)
+rownames(intser) <- intser$Row.names
+intser$Row.names <- NULL
+
+#filter full metabolite set on tryptophan + serum metabolites
+# Find column names containing 'tryptophan'
+tryptophan_cols <- grep("tryptophan", colnames(intser), value = TRUE)
+
+diet_mtb <- c(tryptophan_cols)
+
+# Microbial metabolites
+# Find column names containing 'indole-3-propionic acid' (I3PA) 
+indoleprop_cols <- c('ser_meta_357')
+# Find column names containing 'Indole-3-aldehyde' (IAId) 
+indoleald_cols <- c('ser_meta_191')
+# Find column names containing 'indoxylsulfate' (IS) 
+indoxylsulfate_cols <- c('ser_meta_444')
+# Find column names containing 'tryptamine'
+tryptamine_cols <- c('ser_meta_454', 'ser_meta_251')
+
+
+microbe_mtb <- c(indoleprop_cols, indoleald_cols, indoxylsulfate_cols, tryptamine_cols)
+
+# Combine diet and microbe cols
+selected_cols <- c(diet_mtb, microbe_mtb)
+
+# new df with associated diet and microbe metabolites
+intser_tryptophan <- intser[,selected_cols]
+
+
+#create correlation matrix
+cor = rcorr(as.matrix(intser_tryptophan), type = "pearson")
+
+# create matrices for R, P and P.adj
+cormatrix <- cor$r
+pmatrix <- cor$P
+
+# Subset matrix to only show correlations between intake and serum  metabolites
+subset_rows <- grepl("^ser_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subsetted_matrix <- cormatrix[subset_rows, subset_columns]
+
+# Subset p-value to only show p-values for correlations between intake and serum metabolites
+subset_rows <- grepl("^ser_", rownames(pmatrix))
+subset_columns <- grepl("^int_", colnames(pmatrix))
+subset_p_matrix <- pmatrix[subset_rows, subset_columns]
+
+melt.matrix <- melt(subsetted_matrix)
+melt.matrix$p.value <- round(melt(subset_p_matrix)$value, 3) # add p-values to plot dataset
+melt.matrix$p.value.adj <- p.adjust(melt.matrix$p.value, method = c('fdr')) # adjust P-values for multiple comparison
+melt.matrix$stars <- cut(melt.matrix$p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))  # Create column of significance labels
+melt.matrix$stars.adj <- cut(melt.matrix$p.value.adj, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))
+
+melt.matrix <- melt.matrix[!melt.matrix$value == -Inf,] #delete infinite correlation coefficients
+melt.matrix <- melt.matrix[!melt.matrix$value == 0,] #delete rows where correlation coefficients = 0
+melt.matrix <- melt.matrix[!is.na(melt.matrix$value),]
+# Sort melt.matrix based on the absolute values of the correlations
+sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TRUE), ]
+# Select the top 100 correlations
+top_100 <- sorted_correlations[1:15, ]
+
+
+# ========== 2. PLOT MATRIX USING GGPLOT ======== ##
+
+ggplot(top_100, aes(x = Var1, y = Var2)) +
+  geom_tile(colour="grey20", aes(fill=value), size=0.2) + 
+  scale_fill_gradient2(name = "Pearson's rho", low="navyblue", high="red", midpoint=0, limits=c(-1,1)) +
+  labs(x="",y="") +
+  ggtitle("\nCorrelations\nDietary tryptophan and serum metabolites\n") +
+  geom_text(aes(label=stars.adj), position=position_nudge(y=0.15), color="black", size=3) + 
+  geom_text(aes(label=sprintf("%1.2f", value)), position=position_nudge(y=-0.1), 
+            size=2, colour="black") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -45, hjust = 0, size=8)) + 
+  theme(axis.text.y=element_text(angle = 0, hjust = 1, size=8)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggscatter(intser_tryptophan, x = "int_tryptophan", y = "ser_meta_357", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "dietary tryptophan", ylab = "indole-3-propionic acid")
+
+##========================== CORRELATION POLYPHENOL METABOLITES =============================
+
+#merge intake + serum metabolites
+intser <- merge(filtered_intake, filtered_serum, by = "row.names", all.x = TRUE)
+rownames(intser) <- intser$Row.names
+intser$Row.names <- NULL
+
+#filter full metabolite set on polyphenols + serum metabolites
+# Find column names containing 'polyphenol'
+polyphenol_cols <- grep("polyphenol", colnames(intser), value = TRUE)
+
+#flavonoids
+# Find column names containing 'epicatechin'
+epicatechin_cols <- grep("epicatechin", colnames(intser), value = TRUE)
+# Find column names containing 'catechin'
+catechin_cols <- grep("catechin", colnames(intser), value = TRUE)
+# Find column names containing 'epigallocatechin'
+epigallocatechin_cols <- grep("epigallocatechin", colnames(intser), value = TRUE)
+# Find column names containing 'hesperatin'
+hesperatin_cols <- grep("hesperatin", colnames(intser), value = TRUE)
+# Find column names containing 'naringenin'
+naringenin_cols <- grep("naringenin", colnames(intser), value = TRUE)
+# Find column names containing 'eriodictyol'
+eriodictyol_cols <- grep("eriodictyol", colnames(intser), value = TRUE)
+# Find column names containing 'apigenin'
+apigenin_cols <- grep("apigenin", colnames(intser), value = TRUE)
+# Find column names containing 'luteolin'
+luteolin_cols <- grep("luteolin", colnames(intser), value = TRUE)
+# Find column names containing 'tangeritin'
+tangeritin_cols <- grep("tangeritin", colnames(intser), value = TRUE)
+# Find column names containing 'chrysin'
+chrysin_cols <- grep("chrysin", colnames(intser), value = TRUE)
+# Find column names containing 'genistein'
+genistein_cols <- grep("genistein", colnames(intser), value = TRUE)
+# Find column names containing 'daidzein'
+daidzein_cols <- grep("daidzein", colnames(intser), value = TRUE)
+# Find column names containing 'kaempferol'
+kaempferol_cols <- grep("kaempferol", colnames(intser), value = TRUE)
+# Find column names containing 'myrestin'
+myrestin_cols <- grep("myrestin", colnames(intser), value = TRUE)
+# Find column names containing 'quercetin'
+quercetin_cols <- grep("quercetin", colnames(intser), value = TRUE)
+# Find column names containing 'cyanidin'
+cyanidin_cols <- grep("cyanidin", colnames(intser), value = TRUE)
+# Find column names containing 'delphinidin'
+delphinidin_cols <- grep("delphinidin", colnames(intser), value = TRUE)
+# Find column names containing 'malvedin'
+malvedin_cols <- grep("malvedin", colnames(intser), value = TRUE)
+# Find column names containing 'pelargonidin'
+pelargonidin_cols <- grep("pelargonidin", colnames(intser), value = TRUE)
+
+flavonoids <- c(polyphenol_cols, epicatechin_cols, catechin_cols, epigallocatechin_cols,
+                hesperatin_cols, naringenin_cols, eriodictyol_cols, apigenin_cols, luteolin_cols,
+                tangeritin_cols, chrysin_cols, genistein_cols, daidzein_cols, kaempferol_cols,
+                myrestin_cols, quercetin_cols, cyanidin_cols, delphinidin_cols, malvedin_cols, 
+                pelargonidin_cols)
+
+#phenolic acids
+# Find column names containing 'hydroxybenzoic'
+hydroxybenzoic_cols <- grep("hydroxybenzoic", colnames(intser), value = TRUE)
+# Find column names containing 'protocatechuic'
+protocatechuic_cols <- grep("protocatechuic", colnames(intser), value = TRUE)
+# Find column names containing 'gallic'
+gallic_cols <- grep("gallic", colnames(intser), value = TRUE)
+# Find column names containing 'vanillic'
+vanillic_cols <- grep("vanillic", colnames(intser), value = TRUE)
+# Find column names containing 'ellagic'
+ellagic_cols <- grep("ellagic", colnames(intser), value = TRUE)
+# Find column names containing 'salicyclic'
+salicyclic_cols <- grep("salicyclic", colnames(intser), value = TRUE)
+# Find column names containing 'caffeic'
+caffeic_cols <- grep("caffeic", colnames(intser), value = TRUE)
+# Find column names containing 'ferulic'
+ferulic_cols <- grep("ferulic", colnames(intser), value = TRUE)
+# Find column names containing 'sinapic'
+sinapic_cols <- grep("sinapic", colnames(intser), value = TRUE)
+# Find column names containing 'chlorogenic'
+chlorogenic_cols <- grep("chlorogenic", colnames(intser), value = TRUE)
+# Find column names containing 'coumaric'
+coumaric_cols <- grep("coumaric", colnames(intser), value = TRUE)
+# Find column names containing 'quinic'
+quinic_cols <- grep("quinic", colnames(intser), value = TRUE)
+# Find column names containing 'resveratrol'
+resveratrol_cols <- grep("resveratrol", colnames(intser), value = TRUE)
+
+phenols <- c(hydroxybenzoic_cols, protocatechuic_cols, gallic_cols, vanillic_cols,
+             ellagic_cols, salicyclic_cols, caffeic_cols, ferulic_cols, sinapic_cols,
+             chlorogenic_cols, coumaric_cols, quinic_cols, resveratrol_cols)
+
+diet_mtb <- c(flavonoids, phenols)
+
+# serum metabolites
+# Find column names containing 'quercetin' 
+quercetin_cols <- c('ser_meta_1161', 'ser_meta_1162')
+
+
+microbe_mtb <- c(quercetin_cols)
+
+# Combine diet and microbe cols
+selected_cols <- c(diet_mtb, microbe_mtb)
+
+# new df with associated diet and serum metabolites
+intser_polyphenol <- intser[,selected_cols]
+
+
+#create correlation matrix
+cor = rcorr(as.matrix(intser_polyphenol), type = "pearson")
+
+# create matrices for R, P and P.adj
+cormatrix <- cor$r
+pmatrix <- cor$P
+
+# Subset matrix to only show correlations between intake and serum metabolites
+subset_rows <- grepl("^ser_", rownames(cormatrix))
+subset_columns <- grepl("^int_", colnames(cormatrix))
+subsetted_matrix <- cormatrix[subset_rows, subset_columns]
+
+# Subset p-value to only show p-values for correlations between intake and serum metabolites
+subset_rows <- grepl("^ser_", rownames(pmatrix))
+subset_columns <- grepl("^int_", colnames(pmatrix))
+subset_p_matrix <- pmatrix[subset_rows, subset_columns]
+
+melt.matrix <- melt(subsetted_matrix)
+melt.matrix$p.value <- round(melt(subset_p_matrix)$value, 3) # add p-values to plot dataset
+melt.matrix$p.value.adj <- p.adjust(melt.matrix$p.value, method = c('fdr')) # adjust P-values for multiple comparison
+melt.matrix$stars <- cut(melt.matrix$p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))  # Create column of significance labels
+melt.matrix$stars.adj <- cut(melt.matrix$p.value.adj, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))
+
+melt.matrix <- melt.matrix[!melt.matrix$value == -Inf,] #delete infinite correlation coefficients
+melt.matrix <- melt.matrix[!melt.matrix$value == 0,] #delete rows where correlation coefficients = 0
+melt.matrix <- melt.matrix[!is.na(melt.matrix$value),]
+# Sort melt.matrix based on the absolute values of the correlations
+sorted_correlations <- melt.matrix[order(abs(melt.matrix$value), decreasing = TRUE), ]
+# Select the top 100 correlations
+top_100 <- sorted_correlations[1:100, ]
+
+
+# ========== 2. PLOT MATRIX USING GGPLOT ======== ##
+
+ggplot(top_100, aes(x = Var1, y = Var2)) +
+  geom_tile(colour="grey20", aes(fill=value), size=0.2) + 
+  scale_fill_gradient2(name = "Pearson's rho", low="navyblue", high="red", midpoint=0, limits=c(-1,1)) +
+  labs(x="",y="") +
+  ggtitle("\nCorrelations\nDietary polyphenols and serum metabolites\n") +
+  geom_text(aes(label=stars), position=position_nudge(y=0.2), color="black", size=3) + 
+  geom_text(aes(label=sprintf("%1.2f", value)), position=position_nudge(y=-0.1), 
+            size=2, colour="black") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -45, hjust = 0, size=6)) + 
+  theme(axis.text.y=element_text(angle = 0, hjust = 1, size=5)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggscatter(intser_polyphenol, x = "int_ellagic_acid", y = "ser_meta_1161", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "dietary ellagic acid", ylab = "quercetin 3-(6-[4-glucosyl-p-coumaryl]glucosyl)(1->2)-rhamnoside")
+
