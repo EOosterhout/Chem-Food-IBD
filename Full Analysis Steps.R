@@ -566,15 +566,12 @@ sum(is.na(pseudo)) #0 NA
 pseudo_clean <- remove_outliers(pseudo)
 sum(is.na(pseudo_clean)) #106632 NA
 
-#LOG transformation or RANK transformation
-pseudo_log <- log2(pseudo_clean)
+#RANK transformation
 pseudo_rank <- pseudo_clean %>% mutate_all(~ (length(.) + 1) - rank(.))
 
 ## Filtering of analysis table on metabolite type is performed in == LOAD DATA, CLEANING NAMES AND SUBSETTING == #
 
 # Create a new column specifying IBD (yes/no) for each sample
-pseudo_diagnosis <- cbind(diagnosis = intake_mtb$diagnosis, pseudo_clean)
-pseudo_diagnosis <- cbind(diagnosis = intake_mtb$diagnosis, pseudo_log)
 pseudo_diagnosis <- cbind(diagnosis = intake_mtb$diagnosis, pseudo_rank)
 
 # Add covariates to df
@@ -593,6 +590,7 @@ predictor_vars <- c('age', 'sex', 'BMI', 'diagnosis')
 # Create an empty dataframe to store results
 results_df <- data.frame(Intake_Metabolite = character(),
                          Coefficient = numeric(),
+                         Estimate = numeric(),
                          PValue = numeric(),
                          RSquared = numeric(),
                          stringsAsFactors = FALSE)
@@ -619,6 +617,7 @@ for (dep_var in metabolite_names) {
   if (length(significant_coeffs) > 0) {
     results <- data.frame(Intake_Metabolite = dep_var,
                           Coefficient = names(significant_coeffs),
+                          Estimate = significant_coeffs,
                           PValue = significant_pvalues,
                           RSquared = r_squared,
                           stringsAsFactors = FALSE)
@@ -632,46 +631,15 @@ for (dep_var in metabolite_names) {
 linreg_diagnosis <- results_df[results_df$Coefficient == 'diagnosisIBD',]
 linreg_diagnosis$p_adjusted <- p.adjust(linreg_diagnosis$PValue, method = "fdr") #add column with p_adj for multiple testing
 
-##============================= SIGNIFICANT COEFFICIENTS ==========================##
-
-#Lactic acid
-model_1 <- lm(lactic_acid ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
-summary(model_1)
-plot_summs(model_1)
-
-#Pentanoic acid
-model_2 <- lm(pentanoic_acid ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
-summary(model_2)
-plot_summs(model_2)
-
-#Niacin
-model_3 <- lm(niacin_total ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
-summary(model_3)
-plot_summs(model_3)
-
-#Oxalic acid
-model_4 <- lm(oxalic_acid ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
-summary(model_4)
-plot_summs(model_4)
-
-#Caffeic acid
-model_5 <- lm(caffeic_acid.1 ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
-summary(model_5)
-plot_summs(model_5)
-
-#Selenium
-model_6 <- lm(selenium_se ~ age + sex + BMI + diagnosis, data = pseudo_diagnosis)
-summary(model_6)
-plot_summs(model_6)
 ##============================== VOLCANO PLOT OF LINREG_DIAGNOSIS ===============================##
 
-ggplot(linreg_diagnosis, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Metabolite)) + 
+ggplot(linreg_diagnosis, aes(x=Estimate, y=-1*log10(PValue), label=Intake_Metabolite)) + 
   geom_point() + 
   theme_minimal() +
   theme(legend.position = 'bottom') +
   scale_color_manual(values=c("#999999", "#009E73")) +
   geom_text_repel(size = 2) +
-  scale_x_continuous(name = 'R Squared (diagnosis)')
+  scale_x_continuous(name = 'Estimate')
 
 ##================================================= SIGNIFICANT INTAKE DIFFERENCE (IBD vs NON-IBD) BASED ON FOLDCHANGE ==============================================##
 
@@ -790,15 +758,12 @@ sum(is.na(pseudo)) #0 NA
 pseudo_clean <- remove_outliers(pseudo)
 sum(is.na(pseudo_clean)) #106632 NA
 
-#LOG transformation or RANK transformation
-pseudo_log <- log2(pseudo_clean)
+#RANK transformation
 pseudo_rank <- pseudo_clean %>% mutate_all(~ (length(.) + 1) - rank(.))
 
-## Filtering of analysis table on metabolite type is performed in == LOAD DATA, CLEANING NAMES AND SUBSETTING == #
+## Filtering of analysis table on metabolite (intake, fecal, serum) type is performed in == LOAD DATA, CLEANING NAMES AND SUBSETTING == #
 
 # Create a new column specifying high calprotectin (yes/no) for each sample
-pseudo_calprotectin <- cbind(calprotectin_above150 = intake_mtb$calprotectin_above150, pseudo)
-pseudo_calprotectin <- cbind(calprotectin_above150 = intake_mtb$calprotectin_above150, pseudo_log)
 pseudo_calprotectin <- cbind(calprotectin_above150 = intake_mtb$calprotectin_above150, pseudo_rank)
 
 # Add covariates to df
@@ -817,6 +782,7 @@ predictor_vars <- c('age', 'sex', 'BMI', 'calprotectin_above150')
 # Create an empty dataframe to store results
 results_df <- data.frame(Intake_Metabolite = character(),
                          Coefficient = numeric(),
+                         Estimate = numeric(),
                          PValue = numeric(),
                          RSquared = numeric(),
                          stringsAsFactors = FALSE)
@@ -843,6 +809,7 @@ for (dep_var in metabolite_names) {
   if (length(significant_coeffs) > 0) {
     results <- data.frame(Intake_Metabolite = dep_var,
                           Coefficient = names(significant_coeffs),
+                          Estimate = significant_coeffs,
                           PValue = significant_pvalues,
                           RSquared = r_squared,
                           stringsAsFactors = FALSE)
@@ -856,22 +823,15 @@ for (dep_var in metabolite_names) {
 linreg_calprotectin <- results_df[results_df$Coefficient == 'calprotectin_above150yes',]
 linreg_calprotectin$p_adjusted <- p.adjust(linreg_calprotectin$PValue, method = "fdr") #add column with p_adj for multiple testing
 
-##============================= SIGNIFICANT COEFFICIENTS ==========================##
-
-#Cryptoxanthin beta
-model_1 <- lm(cryptoxanthin_beta ~ age + sex + BMI + calprotectin_above150, data = pseudo_calprotectin)
-summary(model_1)
-plot_summs(model_1)
-
 ##============================== VOLCANO PLOT OF LINREG_CALPROTECTIN ===============================##
 
-ggplot(linreg_calprotectin, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Metabolite)) + 
+ggplot(linreg_calprotectin, aes(x=Estimate, y=-1*log10(PValue), label=Intake_Metabolite)) + 
   geom_point() + 
   theme_minimal() +
   theme(legend.position = 'bottom') +
   scale_color_manual(values=c("#999999", "#009E73")) +
   geom_text_repel(size = 2) +
-  scale_x_continuous(name = 'R Squared (calprotectin)')
+  scale_x_continuous(name = 'Estimate')
 
 ##================================================= SIGNIFICANT INTAKE DIFFERENCE (CALPROTECTIN) ==============================================##
 
@@ -990,14 +950,11 @@ pseudo_clean <- remove_outliers(pseudo)
 sum(is.na(pseudo_clean)) #106632 NA
 
 #LOG transformation or RANK transformation
-pseudo_log <- log2(pseudo_clean)
 pseudo_rank <- pseudo_clean %>% mutate_all(~ (length(.) + 1) - rank(.))
 
-## Filtering of analysis table on metabolite type is performed in == LOAD DATA, CLEANING NAMES AND SUBSETTING == #
+## Filtering of analysis table on metabolite type (intake, fecal, serum) is performed in == LOAD DATA, CLEANING NAMES AND SUBSETTING == #
 
 # Create a new column specifying IBD (yes/no) for each sample
-pseudo_flare <- cbind(before_a_flare = intake_mtb$before_a_flare, pseudo)
-pseudo_flare <- cbind(before_a_flare = intake_mtb$before_a_flare, pseudo_log)
 pseudo_flare <- cbind(before_a_flare = intake_mtb$before_a_flare, pseudo_rank)
 
 # Add covariates to df
@@ -1016,6 +973,7 @@ predictor_vars <- c('age', 'sex', 'BMI', 'before_a_flare')
 # Create an empty dataframe to store results
 results_df <- data.frame(Intake_Metabolite = character(),
                          Coefficient = numeric(),
+                         Estimate = numeric(),
                          PValue = numeric(),
                          RSquared = numeric(),
                          stringsAsFactors = FALSE)
@@ -1042,6 +1000,7 @@ for (dep_var in metabolite_names) {
   if (length(significant_coeffs) > 0) {
     results <- data.frame(Intake_Metabolite = dep_var,
                           Coefficient = names(significant_coeffs),
+                          Estimate = significant_coeffs,
                           PValue = significant_pvalues,
                           RSquared = r_squared,
                           stringsAsFactors = FALSE)
@@ -1051,26 +1010,19 @@ for (dep_var in metabolite_names) {
   }
 }
 
-# Filter results df on significant coefficients 'diagnosis'
+# Filter results df on significant coefficients 'flare'
 linreg_flare <- results_df[results_df$Coefficient == 'before_a_flareyes',]
 linreg_flare$p_adjusted <- p.adjust(linreg_flare$PValue, method = "fdr") #add column with p_adj for multiple testing
 
-##============================= SIGNIFICANT COEFFICIENTS ==========================##
-
-#Cryptoxanthin beta
-model_1 <- lm(daidzin ~ age + sex + BMI + calprotectin_above150, data = pseudo_calprotectin)
-summary(model_1)
-plot_summs(model_1)
-
 ##============================== VOLCANO PLOT OF LINREG_FLARE ===============================##
 
-ggplot(linreg_flare, aes(x=RSquared, y=-1*log10(PValue), label=Intake_Metabolite)) + 
+ggplot(linreg_flare, aes(x=Estimate, y=-1*log10(PValue), label=Intake_Metabolite)) + 
   geom_point() + 
   theme_minimal() +
   theme(legend.position = 'bottom') +
   scale_color_manual(values=c("#999999", "#009E73")) +
   geom_text_repel(size = 2) +
-  scale_x_continuous(name = 'R Squared (calprotectin)')
+  scale_x_continuous(name = 'Estimate')
 
 ##================================================= SIGNIFICANT INTAKE DIFFERENCE (calprotectin) ==============================================##
 
